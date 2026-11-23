@@ -73,6 +73,7 @@ doubt, pay inside or use tap-to-pay.
 | Feature | What it does | Status |
 |---|---|---|
 | **Kismet wardrive bridge** | Start and stop Kismet from the game. Wi-Fi networks and Bluetooth devices go into the game's loot (WiGLE-format CSV), XP and map. Uses one or two Wi-Fi adapters split by band, restarts Kismet after a crash, watches the adapters, and uploads to WiGLE and WDGWars. Nodes can start and stop with it. | 1.0 |
+| **K kill switch** | Press K anywhere while Kismet runs to stop the run, save everything captured, take the Wi-Fi cards out of monitor mode and hand them back to normal Wi-Fi. Nodes that follow Kismet stop too. Ignored while typing or in menus. Details in the [README](README.md#k-is-the-kismet-kill-switch). | 1.0 |
 | **Dual GPS through gpsd** | An on-board receiver and a USB receiver at the same time. The best fix wins (3D fix, then satellites, then accuracy), with a delay so it doesn't flip back and forth. Positions are never mixed between receivers. Kismet gets only the chosen receiver. | 1.0 |
 | **GPS Health screen** | Which receiver is in use and why, satellites, fix quality, and antenna status where the receiver reports it. | 1.0 |
 | **Hardware Check** | One screen covering the board, the AIO v2 power rails, both GPS receivers, the SDR, LoRa, Wi-Fi and Bluetooth adapters, Bristle's USB ports and its reserved Bluetooth adapter. | 1.0 |

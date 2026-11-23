@@ -47,6 +47,36 @@ The full list, with what's new in WDG-Bristle and where everything comes from, i
   skimmers and misses others (a renamed module, a cellular one, one with no radio): a hit is a
   possible skimmer, and no hit never means a pump is safe.
 
+## Kismet only?
+
+You can use WDG-Bristle just for Kismet wardriving. Bristle Nodes, alerts and the rest are optional.
+
+1. Plug in your Wi-Fi card(s) (and a Bluetooth adapter if you want Bluetooth in Kismet), then start
+   the game.
+2. **TAB > PLUGINS > Kismet: Configure & Start** opens the adapter picker:
+   - UP/DOWN to move, SPACE/ENTER to tick a card
+   - M for monitor mode
+   - S to turn the channel split on or off (two cards: one takes 2.4 GHz, the other 5/6 GHz)
+   - R to rescan, ESC to cancel
+3. Networks and Bluetooth devices go into your loot (WiGLE-format CSV), XP and map, placed with the
+   uConsole's GPS.
+
+### K is the Kismet kill switch
+
+Press **K** anywhere in the game while Kismet is running (on the map, the loot screen and so on):
+
+- **Stops the Kismet run** and saves everything captured so far. Networks still waiting for a fix
+  are saved at the last good GPS position from that run.
+- **Turns monitor mode off.** Every Wi-Fi card the game put into monitor mode goes back to managed
+  mode and is handed back to NetworkManager, so normal Wi-Fi works again without a reboot. Cards
+  that were already in monitor mode before you started are left as they were.
+- **Stops Bristle Nodes too** if they're set to follow Kismet (`tie_to_kismet = on` in
+  `bristle.conf`, the default).
+- Does nothing when Kismet isn't running. It's ignored while you're typing in a text box, in the
+  TAB menu or in another plugin's screen, so a stray "k" can't end a run.
+
+You can also stop from **TAB > PLUGINS > Kismet: Stop**.
+
 ## Hardware
 
 | Part | Notes |
