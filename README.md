@@ -14,6 +14,9 @@ repository is a fork of it. Other credits are in [THIRD_PARTY_NOTICES.md](THIRD_
 
 ## What it does
 
+The full list, with what's new in WDG-Bristle and where everything comes from, is in
+**[FEATURES.md](FEATURES.md)**.
+
 - **Kismet wardriving.** Start and stop Kismet from the game. Networks and Bluetooth devices go
   into the game's loot (WiGLE-format CSV), XP and map, placed with the uConsole's GPS. One or two
   Wi-Fi adapters, split by band. Uploads to WiGLE and WDGWars.
