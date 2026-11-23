@@ -329,6 +329,10 @@ except Exception:
         def poll(*_args):
             pass
 KISMET_SPLIT_MODE = (_secret("WDG_KISMET_SPLIT", default="band") or "band").strip().lower()
+# [bristle] 1.2.1: how the K kill switch is named on screen (the map label, the line at the start)
+KILL_SWITCH_HUD = "K: stop Kismet"
+KILL_SWITCH_HUD_Y = 24            # below the map's top-left row, which the emergency scan's lightbar uses
+KILL_SWITCH_LINE = "Kismet running. Press K anywhere to stop and turn monitor mode off"
 if KISMET_SPLIT_MODE not in ("band", "off"):
     KISMET_SPLIT_MODE = "band"
 # [merge-v3] With two GPS receivers behind gpsd, Kismet reads the one the game
@@ -1145,7 +1149,7 @@ class KismetWardriveBridge(PluginBase):
     def menu_items(self):
         return [
             PluginMenuItem(key="k", label="Kismet: Configure & Start", action="start_wardrive"),
-            PluginMenuItem(key="j", label="Kismet: Stop", action="stop_wardrive"),
+            PluginMenuItem(key="j", label="Kismet: Stop (or K anywhere)", action="stop_wardrive"),   # [bristle] 1.2.1
             PluginMenuItem(key="u", label="Kismet: Upload to WiGLE.net", action="upload_wigle"),
             PluginMenuItem(key="t", label="Kismet: Self-Test", action="self_test"),
         ]
@@ -1797,6 +1801,7 @@ class KismetWardriveBridge(PluginBase):
         up, write the hardware manifest, then start Kismet. Only logs via
         term() (lock-protected); the result goes to on_update()."""
         forced, wifi_ready, ble_ready = [], [], []
+        monitor_before = set()           # [bristle] 1.2.1: cards that were in monitor mode before we touched them
         ok = False
         locks = {}                       # [bristle] interface -> channel, for this launch
         launch_locks = dict(getattr(self, "_launch_locks", None) or {})
@@ -1812,6 +1817,13 @@ class KismetWardriveBridge(PluginBase):
                     if cur != iface:
                         self.term(f"[KISMET] {mac} is now {cur} (was {iface}) -- using {cur}")
                 if want_mon:
+                    # [bristle] 1.2.1: only looked at, for the report at stop (read only)
+                    try:
+                        looked = getattr(hw, "is_monitor", None)
+                        if callable(looked) and looked(cur) is True:
+                            monitor_before.add(cur)
+                    except Exception:
+                        pass
                     # Scoped release of JUST this interface (W5 lesson:
                     # the old system-wide `airmon-ng check kill` took the
                     # desktop's WiFi down too).
@@ -1878,6 +1890,11 @@ class KismetWardriveBridge(PluginBase):
                     extra["channel_locks"] = locks
                 self._locks_wanted = dict(locks)
                 self._locks_said = set()
+                # [bristle] 1.2.1, for the stop report. What a card was before the DRIVE is what the
+                # first segment saw: on a rotation the game itself has just switched it back and on.
+                self._wifi_used = list(wifi_ready)
+                if getattr(self, "_segment_no", 1) <= 1:
+                    self._monitor_before = set(monitor_before)
                 ok = self.engine.start(wifi_ready, ble_ready, gps_override=use_gps, **extra)
         except Exception as e:
             self.term(f"[KISMET] Start error: {e}")
@@ -1997,6 +2014,10 @@ class KismetWardriveBridge(PluginBase):
                 self._start_poll_thread()
                 self._save_adapter_prefs()
                 self.msg("Kismet wardriving started")
+                # [bristle] 1.2.1: say once per drive how to stop it (not again on a rotation or
+                # a restart after a crash, which are the same drive)
+                if getattr(self, "_segment_no", 1) <= 1:
+                    self.term("[KISMET] " + KILL_SWITCH_LINE)
             else:
                 self.msg("Kismet failed to start -- see terminal log")
                 self._lifecycle = "stopping"
@@ -2185,15 +2206,30 @@ class KismetWardriveBridge(PluginBase):
         if forced is None:
             forced = list(getattr(self, "_monitor_forced", []))
             self._monitor_forced = []
+        results = {}                     # [bristle] 1.2.1: interface -> (back in managed mode?, why not)
         for iface in forced:
             try:
-                hw.set_monitor(iface, False, log=self.term)
+                answer = hw.set_monitor(iface, False, log=self.term)
+                ok, why = (bool(answer[0]), str(answer[1])) if isinstance(answer, tuple) and len(answer) == 2 \
+                    else (True, "")      # a stand-in that answers nothing: as before, taken as done
             except Exception as e:
+                ok, why = False, str(e)
                 self.term(f"[KISMET] Could not restore {iface} to managed mode: {e}")
+            results[iface] = (ok, why)
             try:
                 hw.release_interface_back(iface, log=self.term)
             except Exception as e:
                 self.term(f"[KISMET] Could not hand {iface} back to NetworkManager: {e}")
+        # [bristle] 1.2.1: say which cards went back to managed mode and which were left as they were.
+        # Not on a rotation (or a restart after a crash): Kismet starts again on the same cards
+        # at once, and the report comes when the drive ends.
+        if getattr(self, "_relaunch_after_stop", False):
+            return
+        used = list(getattr(self, "_wifi_used", None) or [])
+        already = set(getattr(self, "_monitor_before", None) or ())
+        for line in kx.stop_report(used, forced, results, already):
+            self.term("[KISMET] " + line)
+        self._wifi_used, self._monitor_before = [], set()
 
     def _maybe_rotate_session(self) -> bool:
         """v-next: optional session auto-rotation
@@ -2773,6 +2809,20 @@ class KismetWardriveBridge(PluginBase):
 
     def _seg_peak_temp_get(self):
         return getattr(self, "_seg_peak_temp", None)
+
+    def draw_map_overlay(self, pyxel, w, hud_top, term_y) -> None:
+        """[bristle] 1.2.1: while Kismet captures, a small label at the left edge of the map says
+        how to stop it. (The bottom bar's own "KISMET W:n B:n" tag has no room left for it.) It
+        sits one row under the top-left corner, which the emergency scan's lightbar and status
+        text use, and left of the Bristle alert popup. app.py calls this for every plugin while
+        the map is drawn."""
+        if self._lifecycle != "running" or not self.kismet_active():
+            return
+        width = len(KILL_SWITCH_HUD) * 5 + 6
+        y = hud_top + KILL_SWITCH_HUD_Y
+        pyxel.rect(3, y, width, 11, 0)
+        pyxel.rectb(3, y, width, 11, 5)
+        pyxel.text(6, y + 2, KILL_SWITCH_HUD, 10)
 
     def kismet_active(self) -> bool:
         """Used by app.py's bottom-bar tools tag list -- True while

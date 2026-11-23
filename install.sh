@@ -85,10 +85,9 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 USER_NAME="$(id -un)"
-# [bristle] The earlier build's folder and desktop id (kept in watchdogs/legacy_names.py). Used only
-# to bring your data over from an old install and to remove its icon. Empty if they can't be read:
-# then nothing old is looked for.
-OLD_INSTALL_NAME="$(python3 "$DIR/tools/install_helper.py" old-name install-dir 2>/dev/null || true)"
+# [bristle] The earlier build's desktop id (kept in watchdogs/legacy_names.py). Used only to remove
+# its icon. Empty if it can't be read: then no old icon is looked for. (The earlier install's
+# folder is found by tools/install_helper.py itself, in step 2.)
 OLD_DESKTOP_ID="$(python3 "$DIR/tools/install_helper.py" old-name desktop-id 2>/dev/null || true)"
 info "sudo is needed for packages, gpsd and hardware detection. You may be asked for your password."
 if ! sudo -v; then

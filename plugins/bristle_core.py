@@ -33,7 +33,7 @@ SOUNDS = {"notice": (52, "c3e3", "t", "4", "n", 14), "warning": (53, "a3d3a3d3",
 
 class BristleNodes(PluginBase):
     NAME = "Bristle: Nodes"
-    VERSION = "1.2"
+    VERSION = "1.2.1"
     AUTHOR = "WDG-Bristle"
     BACKGROUND_TICK = True          # nodes keep delivering while the screen is closed
 

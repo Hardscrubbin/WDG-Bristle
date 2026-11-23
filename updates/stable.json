@@ -6,6 +6,6 @@
   "release_id": "v0.9.21.3",
   "version": "0.9.21.3",
   "source_commit": "",
-  "title": "WDG-Bristle 1.2 (base 0.9.21.3)",
-  "notes": "WDG-Bristle 1.2, built on Watch Dogs Go 0.9.21.3 by LOCOSP.\n\nThis build has no in-game updater. Update with git pull and ./install.sh.\n\nhttps://github.com/Hardscrubbin/WDG-Bristle"
+  "title": "WDG-Bristle 1.2.1 (base 0.9.21.3)",
+  "notes": "WDG-Bristle 1.2.1, built on Watch Dogs Go 0.9.21.3 by LOCOSP.\n\nThis build has no in-game updater. Update with git pull and ./install.sh.\n\nhttps://github.com/Hardscrubbin/WDG-Bristle"
 }

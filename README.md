@@ -9,7 +9,7 @@ uConsole.
 artwork and most of what you see are LOCOSP's work, under LOCOSP's [LICENSE](LICENSE) (MIT). This
 repository is a fork of it. Other credits are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-> **Status.** WDG-Bristle 1.2. Early. The Bristle Nodes firmware and everything it adds to the game
+> **Status.** WDG-Bristle 1.2.1. Early. The Bristle Nodes firmware and everything it adds to the game
 > have been compiled and unit-tested, and have **not yet run on real boards**: the bench list in
 > [`bristle/docs/BENCH_TESTS.md`](bristle/docs/BENCH_TESTS.md) is still to be worked through. Expect
 > rough edges, and do not rely on them yet.
@@ -70,9 +70,11 @@ Press **K** anywhere in the game while Kismet is running (on the map, the loot s
 
 - **Stops the Kismet run** and saves everything captured so far. Networks still waiting for a fix
   are saved at the last good GPS position from that run.
-- **Turns monitor mode off.** Every Wi-Fi card the game put into monitor mode goes back to managed
-  mode and is handed back to NetworkManager, so normal Wi-Fi works again without a reboot. Cards
-  that were already in monitor mode before you started are left as they were.
+- **Turns monitor mode off.** Every Wi-Fi card you ticked **M** (monitor mode) for in the picker
+  goes back to managed mode and is handed back to NetworkManager, so normal Wi-Fi works again
+  without a reboot. That includes a card that was already in monitor mode before the run. Cards
+  without M ticked are never touched. The terminal lists what happened to each card, and gives the
+  command to fix it by hand if one is still in monitor mode.
 - **Stops Bristle Nodes too** if they're set to follow Kismet (`tie_to_kismet = on` in
   `bristle.conf`, the default).
 - Does nothing when Kismet isn't running. It's ignored while you're typing in a text box, in the

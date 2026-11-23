@@ -5,7 +5,10 @@ stalled ack it resends from its oldest unacked find, so the core sees repeats. T
   - accepts each (node, seq) exactly once,
   - computes the ack point: the lowest seq the core still needs (everything below is held),
   - skips gaps the node can't fill (it reports its oldest queued seq `qo` in the heartbeat; anything
-    below that is gone, e.g. dropped when flash filled, or skipped after a reboot).
+    below that is gone, e.g. dropped when flash filled, or skipped after a reboot),
+  - says an ack again when the node shows it never got it: an ACK line can be lost like any other
+    (a damaged line, a lost frame, a node that restarted just before it arrived), and a node that
+    is never told keeps its finds and offers them again for ever.
 """
 from __future__ import annotations
 
@@ -44,6 +47,8 @@ class NodeDelivery:
 
     def node_oldest(self, oldest: int) -> None:
         """Heartbeat `qo`: the node no longer holds anything below `oldest`."""
+        if oldest < self.last_ack_value:
+            self.say_again()              # it still holds finds we told it to forget: that ACK was lost
         if oldest > self.ack_point:
             if self.synced:               # the first report only tells us where to start
                 self.skipped += (oldest - self.ack_point) - sum(1 for s in self.above if s < oldest)
@@ -60,6 +65,10 @@ class NodeDelivery:
     def processed(self, seq: int) -> None:
         """The find with this seq has been dealt with for good (written, or counted as dropped)."""
         self.unprocessed.discard(seq)
+
+    def say_again(self) -> None:
+        """The next ack_due() sends the ack value even if it has not changed since the last one."""
+        self.last_ack_value = -1
 
     def ack_value(self) -> int:
         """What the node may forget: everything below this is received AND dealt with."""

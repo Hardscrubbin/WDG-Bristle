@@ -430,6 +430,10 @@ class BristleService:
                      % (session.hwid, proto.BUSY_RETRY_MS // 1000), "warn")
         elif kind == "silent":
             self.say("[BRISTLE] Node %s went quiet (%s s): reconnecting" % (session.number, info.get("seconds")), "warn")
+        elif kind == "reauth":
+            # 1.2.1: one line that says what happened, instead of "refused <command>: not
+            # authenticated" for every command that reached the node before the new handshake.
+            self.say("[BRISTLE] Node %s restarted or dropped the link: connecting again" % session.number, "warn")
         elif kind == "not_ours":
             self.say("[BRISTLE] %s has another owner: ignored" % where, "warn")
         elif kind == "forgotten":
@@ -437,7 +441,9 @@ class BristleService:
         elif kind == "rsp":
             if info.get("c") == "OTA" and self.ota is not None and session is self.ota.session:
                 self.ota.sender.on_rsp(bool(info.get("ok")), info.get("e"))
-            elif not info.get("ok"):
+            elif not info.get("ok") and info.get("e") != proto.ERRORS["NOT_AUTHED"]:
+                # ("not authenticated" is the node saying it restarted: the session shakes hands
+                # again by itself and the "reauth" line above says so.)
                 self.say("[BRISTLE] Node %s refused %s: %s" % (session.number, info.get("c"), info.get("e")), "warn")
 
     # ------------------------------------------------------------------ what the screen asks for

@@ -1,3 +1,33 @@
+# WDG-Bristle 1.2.1 (base 0.9.21.3)
+
+Built and unit-tested on a PC. Nothing in this entry has run on the uConsole, on a Wi-Fi card
+under Kismet or on a board yet; the bench list is `bristle/docs/BENCH_TESTS.md`. The simulations
+named below are stand-ins: a scripted node on a PC, not a board.
+
+- The K kill switch is marked in the game. While Kismet runs the map shows **K: stop Kismet**;
+  a drive that starts says once in the terminal `Kismet running. Press K anywhere to stop and turn
+  monitor mode off`; the PLUGINS entry reads **Kismet: Stop (or K anywhere)**. What K does has
+  not changed.
+- When a Kismet run ends, the terminal lists which Wi-Fi cards went back to managed mode and were
+  handed back to NetworkManager, which were left as they were (monitor mode was not ticked for
+  them), and any card that would not switch back, with the command to do it by hand.
+- Bristle Nodes, found by the new simulations and fixed:
+  - An ACK that did not reach a node was never repeated. A quiet node went on sending the same
+    finds every 10 s, and a node that restarted just before the ACK arrived was never
+    acknowledged again, so its queue could only fill. The game now says the ACK again when the
+    node's heartbeat shows it still holds those finds, and after every new handshake.
+  - A node that answered a hello late (two hellos waiting for it) was announced as
+    "has another owner: ignored" before it linked. Its late answer is now waited out.
+  - A node that restarted made the terminal say `refused ACK: not authenticated`. It now says
+    `Node N restarted or dropped the link: connecting again`, once.
+  - Node firmware `v1-build5-dev`: a node no longer takes the sender of an old (replayed) ESP-NOW
+    frame for its bridge. Up to build 4 a recorded frame, played back, made the node send
+    everything to that address until it gave the bridge up for lost (20 s). Nothing was accepted
+    from such a frame and nothing was lost, but the node was cut off for that time.
+- `tools/sim` has a Bristle feature: a scripted node and bridge that speak the real protocol,
+  21 scenarios (adoption, the owner lock, damaged lines, forged and replayed frames, fragments,
+  the queue across dropouts and restarts, updates that are cut off or roll back, a second core).
+- `install.sh`: an unused variable removed.
 # WDG-Bristle 1.2 (base 0.9.21.3)
 
 Built and unit-tested on a PC. Nothing in this entry has run on the uConsole, on a Wi-Fi card

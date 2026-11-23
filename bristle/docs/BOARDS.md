@@ -12,7 +12,7 @@
 | spiffs (LittleFS) | 0x510000 | 2.875 MB (0x2E0000) | the find queue |
 | coredump | 0x7F0000 | 64 KB | crash dumps |
 
-Build 4 is about 1.49 MB, 57% of a slot.
+Build 5 is about 1.49 MB, 57% of a slot.
 
 ## The find queue: how much it holds, how often it writes
 

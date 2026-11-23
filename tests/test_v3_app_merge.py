@@ -159,14 +159,14 @@ class VersionTests(unittest.TestCase):
 
     def test_display_version_carries_the_build_tag_and_strips_back(self):
         shown = merge_build.display_version(watchdogs.__version__)
-        self.assertEqual(shown, "WDG-Bristle 1.2 (base 0.9.21.3)")  # [bristle]
+        self.assertEqual(shown, "WDG-Bristle 1.2.1 (base 0.9.21.3)")  # [bristle]
         self.assertEqual(merge_build.numeric_version(shown), "0.9.21.3")
         self.assertEqual(game_updates._numeric(merge_build.numeric_version(shown)), (0, 9, 21, 3))
 
     def test_startup_line_and_credits(self):
         self.assertIn('f"[SYS] {merge_build.display_version(__version__)}"', TEXT)
         self.assertIn('_author = "by LOCOSP"', TEXT)
-        self.assertIn('_modified = "WDG-Bristle 1.2"', TEXT)
+        self.assertIn('_modified = "WDG-Bristle 1.2.1"', TEXT)
         self.assertIn("NOTICE_NONE", TEXT.split("def _draw_gameupd_screen", 1)[1])
         self.assertNotIn("avatar.png", TEXT)
 

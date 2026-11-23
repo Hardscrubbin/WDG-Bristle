@@ -1,6 +1,6 @@
 # Porting Bristle to another base (raylib / WDGoNG)
 
-Kept current with the code. Last update: WDG-Bristle 1.2.
+Kept current with the code. Last update: WDG-Bristle 1.2.1.
 
 Bristle is built so that moving it to a different game base means rewriting three thin files and
 a handful of small edits, not the logic. This page lists every place Bristle touches the drawing library
@@ -124,7 +124,7 @@ Each is tagged `[bristle]` in a comment. A port needs the same things from the n
 | `watchdogs/app.py`, `_draw_player()` (1.2) | while `_map_focus` is set the player figure is drawn at the player's position (not at all when that is off the map) instead of in the middle of the screen | the figure would otherwise stand on the suspect | a base that draws the player by position needs nothing |
 | `plugins/kismet_wardrive.py`, `datasources()` (1.2) | a source the plugin holds on one channel carries `lock` | the node planner counts a locked channel as covered by Kismet (`plan.kismet_heavy_channels`) | pass `lock`, or `hopping` False with `channel`, in the source list handed to `kismet_tap.poll` |
 
-### Other `[bristle]` edits in 1.2 that are not part of Bristle Nodes
+### Other `[bristle]` edits in 1.2 and 1.2.1 that are not part of Bristle Nodes
 
 They are the game's own features, tagged the same way so they can be found. A port of the nodes
 does not need them.
@@ -133,6 +133,9 @@ does not need them.
 |---|---|---|
 | `plugins/kismet_wardrive.py` | the per-card channel lock (picker keys, the lock in the launch, putting it in force on the poll thread) and the per-card plan lines in the picker | `plugins/_kismet_extras.py` (`plan_cards`, `resolve_locks`, `picker_plan`, `parse_iw_channels`: no pyxel, no I/O) |
 | `plugins/_w5_hardware.py` | `phy_info()`: the text of `iw phy` for one card, read only | |
+| `plugins/kismet_wardrive.py` (1.2.1) | the K kill switch is marked: `draw_map_overlay()` draws `K: stop Kismet` while Kismet captures (its only pyxel calls: one `rect`, one `rectb`, one `text`, through the object the game passes in), one terminal line when a drive starts, the menu label, and the list of cards at stop in `_restore_adapters` | `plugins/_kismet_extras.py`, `stop_report()` (the wording: no pyxel, no I/O) |
+| `plugins/_w5_hardware.py` (1.2.1) | `is_monitor()`: whether a card is in monitor mode, from `iw dev <card> info`, read only | |
+| `tests/test_v3_sim.py` (1.2.1) | the list of simulated features gains `bristle` | `tools/sim/fake_bristle.py`, `tools/sim/scenarios_bristle.py` (stand-ins: they import the core library and the service, never pyxel or the game) |
 | `watchdogs/app.py`, the Firmware screen and `_flash_do` / `_run_flash` | the note on disk around a firmware write, **F** for an install that did not finish, the page that says what state the board is in | `watchdogs/c5_resume.py` (no pyxel, no game object) |
 | `install.sh`, `tools/install_helper.py`, `watchdogs/legacy_names.py` | the first install finds earlier installs under the home folder and copies the player's data | `tools/install_helper.py` (`find_old_installs`, `copy_data`, `bring_data`) |
 

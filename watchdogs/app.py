@@ -1447,7 +1447,7 @@ class WatchDogsGame:
         # [merge-v3] __version__ stays numeric (0.9.21.3) for update compares;
         # the build tag is display-only.
         from watchdogs import merge_build  # [merge-v3] local: see watchdogs/merge_build.py
-        self._term_add(f"[SYS] {merge_build.display_version(__version__)}", raw=True)  # [bristle] "WDG-Bristle 1.2 (base ...)"
+        self._term_add(f"[SYS] {merge_build.display_version(__version__)}", raw=True)  # [bristle] "WDG-Bristle 1.2.1 (base ...)"
         self._term_add("[SYS] TAB=menu  SPACE=hack  =/]=zoom+  -/[=zoom-", raw=True)
         if self._esp32:
             self._term_add(f"[OK] ESP32 connected on {port}", raw=True)
@@ -1539,7 +1539,7 @@ class WatchDogsGame:
         # ── Subtitle ──
         sub_y = logo_bottom + 8
         _author = "by LOCOSP"
-        _modified = "WDG-Bristle 1.2"  # [bristle] the app's name and version
+        _modified = "WDG-Bristle 1.2.1"  # [bristle] the app's name and version
         _font = getattr(self, "_font", None)
         _author_w = _font.text_width(_author) if _font is not None else len(_author) * 4
         _modified_w = _font.text_width(_modified) if _font is not None else len(_modified) * 4

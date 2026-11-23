@@ -5,6 +5,8 @@ scenario. The 8-hour soak is not run here (python -I tools/sim/run.py --soak).
 The scenarios drive real game modules against local fakes only: a fake gpsd,
 a fake Kismet REST API, a fake wigle.net / WDGWars portal, a fake dump1090
 feed, fake rtl_power / rtl_433 output and scripted hardware probes.
+[bristle] 1.2.1: and, for Bristle Nodes, a scripted node and bridge that speak
+the real protocol (tools/sim/fake_bristle.py). Stand-ins, not hardware.
 """
 import io
 import sys
@@ -25,11 +27,12 @@ class SimulationTests(unittest.TestCase):
     """One test_<feature> method per feature is added below."""
 
     def test_harness_lists_every_feature_the_build_promises(self):
-        self.assertEqual(FEATURES, ["433", "adsb", "backup", "gpsd", "hardware", "kismet", "lora", "portal",
-                                    "storage", "uploads"])
+        self.assertEqual(FEATURES, ["433", "adsb", "backup", "bristle", "gpsd", "hardware", "kismet", "lora",   # [bristle]
+                                    "portal", "storage", "uploads"])
         soak = [name for feature, name, _f, _l, is_soak in core.SCENARIOS if is_soak]
         self.assertEqual(len(soak), 1)
-        self.assertGreaterEqual(len(core.SCENARIOS), 60)
+        self.assertGreaterEqual(len(core.SCENARIOS), 81)                      # [bristle] 60 + 21 Bristle
+        self.assertGreaterEqual(sum(1 for feature, *_rest in core.SCENARIOS if feature == "bristle"), 21)
         names = [(feature, name) for feature, name, _f, _l, _s in core.SCENARIOS]
         self.assertEqual(len(names), len(set(names)))
 

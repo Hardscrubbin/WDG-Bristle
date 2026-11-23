@@ -11,8 +11,9 @@ Images are in `firmware/releases/<release>/<board>/`. Pick the folder for your b
 8 MB flash minimum. Every first flash must **erase** the board and use the **FULL** image: that is
 what puts the Bristle flash layout (two update slots and the find queue) on it.
 
-Use `v1-build4-dev` or later. Earlier builds are superseded: build 3 has only the USB link and no
-updates over the air, build 2's images carry folder names of the PC that built them, and build 1
+Use `v1-build5-dev` or later. Earlier builds are superseded: build 4 lets a replayed ESP-NOW frame
+cut a node off from its bridge for 20 s (fixed in 5; a board on build 4 can be updated over the
+air), build 3 has only the USB link and no updates over the air, build 2's images carry folder names of the PC that built them, and build 1
 has an older flash layout. Don't flash them.
 
 The images contain third-party software (Espressif's Arduino core and ESP-IDF, NimBLE and others).
@@ -91,7 +92,7 @@ esptool --chip esp32c5 --port <PORT> --baud 921600 write-flash 0x10000 bristle-<
 2. The STATE column shows `upd 37%`; the line above the messages shows the link and the progress.
    One node at a time. The node stops scanning during its update.
 3. At 100% the node checks the image it stored (SHA-256, read back from flash), switches to it and
-   restarts. The messages say `Node 3 now runs build 4`, or that it is back on its old build.
+   restarts. The messages say `Node 3 now runs build 5`, or that it is back on its old build.
 
 What protects the node:
 - Nothing changes what it boots until the whole image has arrived and checked out. Pull the cable,
@@ -107,7 +108,7 @@ minutes over a UART port, 3 to 5 minutes through the bridge or over Bluetooth.
 Open a serial terminal at 115200 (Arduino Serial Monitor, PuTTY, or on the uConsole:
 `python3 -m serial.tools.miniterm /dev/ttyACM0 115200`). Press RESET. You should see:
 ```
-# Bristle node build 4 (xiao_c5), hw a0b1c2d3e4f5, no owner yet
+# Bristle node build 5 (xiao_c5), hw a0b1c2d3e4f5, no owner yet
 ```
 and then, once a second while nothing has spoken to the board, a line starting `BCN:`. That is the
 board saying "a Bristle board is here"; it stops for a minute when you type a command.

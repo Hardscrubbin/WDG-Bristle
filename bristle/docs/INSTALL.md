@@ -12,7 +12,7 @@ written to do; the bench list is where it gets proven.
 - WDG-Bristle 1.1 installed (`INSTALL_WDG_BRISTLE.md` inside the game folder). Its installer sets
   up everything Bristle needs: the Python packages (`pyserial`, `bleak`, `esptool`, `cryptography`)
   are in the game's `requirements.txt`, and your user is put in the `dialout` and `bluetooth` groups.
-- Boards flashed with `v1-build4-dev` or later, or blank boards (the game can flash them).
+- Boards flashed with `v1-build5-dev`, or blank boards (the game can flash them). A board still on build 4 links and scans too; update it from the Nodes screen.
 - A **powered** USB hub. Nodes are never powered from the uConsole's AIO board.
 
 ## Settings

@@ -276,6 +276,44 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(d.ack_due(0.5, now=10.6), 2)
         self.assertIsNone(d.ack_due(0.5, now=11.5))
 
+    def test_a_lost_ack_is_said_again(self):
+        """Found by the stand-in simulations (WDG-Bristle 1.2.1). An ACK is a line like any other and
+        can be lost. The node then keeps its finds and offers them again every 10 s, and the core
+        said nothing because its ack value had not changed: a quiet node resent for ever."""
+        d = NodeDelivery()
+        d.node_oldest(10)
+        for seq in range(10, 15):
+            self.assertTrue(d.accept(seq))
+        self.assertEqual(d.ack_due(0.5, now=1.0), 15)        # this line never reaches the node
+        self.assertIsNone(d.ack_due(0.5, now=5.0))           # nothing new: nothing to say
+        d.node_oldest(10)                                    # heartbeat: it still holds everything from 10
+        self.assertEqual(d.ack_due(0.5, now=6.0), 15)        # so it is told again
+        d.node_oldest(10)                                    # a heartbeat that was already on its way
+        self.assertIsNone(d.ack_due(0.5, now=6.2))           # not faster than the link's ack interval
+        self.assertEqual(d.ack_due(0.5, now=6.6), 15)
+        d.node_oldest(15)                                    # now it has it
+        self.assertIsNone(d.ack_due(0.5, now=20.0))
+        self.assertEqual(d.duplicates, 0)
+
+    def test_a_lost_ack_before_a_node_restart_does_not_block_what_comes_after(self):
+        """The worse half of the same fault. The core acks 1030 just as the node restarts (the node
+        answers "not authenticated"). After its restart the node numbers from a fresh block, so
+        for the core there is a gap, and only the node's heartbeat can close it; but the node still
+        holds 1000..1029 and reports 1000. Nothing after the restart was ever acknowledged."""
+        d = NodeDelivery()
+        d.node_oldest(1000)
+        for seq in range(1000, 1030):
+            d.accept(seq)
+        self.assertEqual(d.ack_due(0.5, now=1.0), 1030)      # lost: the node had just restarted
+        for seq in range(2000, 2030):                        # what it heard after the restart
+            self.assertTrue(d.accept(seq))
+        self.assertEqual(d.ack_value(), 1030)                # held up at the gap, as it should be
+        d.say_again()                                        # the session does this when it shakes hands again
+        self.assertEqual(d.ack_due(0.5, now=3.0), 1030)
+        d.node_oldest(2000)                                  # the node dropped 1000..1029 and says where it starts
+        self.assertEqual(d.ack_due(0.5, now=6.0), 2030)
+        self.assertEqual(d.duplicates, 0)
+
 
 class GpsPlacement(unittest.TestCase):
     def test_interpolate_nearest_and_reject(self):
@@ -450,6 +488,62 @@ class SessionKeepingInStep(unittest.TestCase):
         self.assertEqual(s.state, S.NO_ANSWER)
         self.hello(s)
         self.assertEqual(s.state, S.AUTHED)
+
+    def test_a_late_answer_to_an_earlier_hello_is_not_another_owner(self):
+        """Found by the stand-in simulations (WDG-Bristle 1.2.1). The core says HI, hears nothing in
+        time and says HI again with a new nonce. A node that was only slow answers both. Its first
+        answer proves the first nonce: that was taken for a board with another owner (warning on
+        screen, state NOT_OURS) until the second answer arrived."""
+        s = self.make()
+        first = s._core_nonce
+        self.now.t += proto.USB_HELLO_WAIT_MS / 1000 + 0.1
+        s.tick()
+        self.assertEqual(self.count("HI"), 2)
+        self.assertNotEqual(s._core_nonce, first)
+        late = {"v": 1, "hw": self.HW, "bd": "xiao_c5", "b": 2, "cap": proto.HB_CAP_5G, "nn": "11" * 16,
+                "np": crypto.node_proof(KEY, first, bytes.fromhex(self.HW))}
+        s.feed_line(codec.build("HELLO", late))
+        self.assertEqual(s.state, S.HELLO_WAIT)              # waited out, not judged
+        self.assertNotIn("not_ours", self.events)
+        self.assertEqual((self.count("AUTH"), s.late_hellos), (0, 1))
+        self.hello(s)                                        # the answer to the second HI
+        self.assertEqual(s.state, S.AUTHED)
+        self.assertEqual(self.events.count("authed"), 1)
+        s.feed_line(codec.build("HELLO", late))              # and if the late one comes last, the link stays
+        self.assertEqual(s.state, S.AUTHED)
+        self.assertNotIn("not_ours", self.events)
+
+    def test_an_answer_that_proves_no_hello_of_this_run_is_another_owner(self):
+        s = self.make()
+        old = s._core_nonce
+        s.start()                                            # a new run: the earlier nonce no longer counts
+        for key, nonce in ((bytes(16), s._core_nonce), (KEY, old), (KEY, bytes(16))):
+            s.state = S.HELLO_WAIT
+            s.feed_line(codec.build("HELLO", {
+                "v": 1, "hw": self.HW, "bd": "xiao_c5", "b": 2, "cap": 0, "nn": "22" * 16,
+                "np": crypto.node_proof(key, nonce, bytes.fromhex(self.HW))}))
+            self.assertEqual(s.state, S.NOT_OURS)
+        self.assertEqual(self.count("AUTH"), 0)
+
+    def test_the_ack_is_said_again_after_a_new_handshake(self):
+        s = self.make()
+        self.hello(s)
+        delivery = s.delivery.node(self.HW)
+        delivery.node_oldest(1000)
+        for seq in range(1000, 1003):
+            s.feed_line(codec.build("AP", {"q": seq, "t": 1700000000, "s": 1, "b": "a42bb0123456", "c": 6,
+                                           "r": -50, "k": 3}))
+        self.now.t += 1
+        s.tick()
+        acks = [codec.parse(x).get("q") for x in self.sent if codec.parse(x).type == "ACK"]
+        self.assertEqual(acks, ["1003"])
+        s.feed_line(codec.build("RSP", {"c": "ACK", "ok": 0, "e": proto.ERRORS["NOT_AUTHED"]}))   # it had restarted
+        self.assertEqual(s.state, S.HELLO_WAIT)
+        self.hello(s)
+        self.now.t += 1
+        s.tick()
+        acks = [codec.parse(x).get("q") for x in self.sent if codec.parse(x).type == "ACK"]
+        self.assertEqual(acks, ["1003", "1003"])
 
     def test_idle_link_is_pinged_and_clock_is_resent(self):
         s = self.make()

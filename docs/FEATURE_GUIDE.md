@@ -73,7 +73,7 @@ The shutdown validation uses isolated test data and real uConsole hardware; it d
 
 ## 🔔 Game updates
 
-Open **SYSTEM → Update Game** for the installed version; this build has no in-game updater. Startup retains **by LOCOSP**, with **WDG-Bristle 1.2** underneath.
+Open **SYSTEM → Update Game** for the installed version; this build has no in-game updater. Startup retains **by LOCOSP**, with **WDG-Bristle 1.2.1** underneath.
 
 Startup checks happen in the background. A new approved release gets one main-screen notice, remembered across restarts. **OK** opens its notes; **No / Esc** dismisses it. A dismissed release remains accessible through the white **Update Game** menu entry. Installation needs a separate confirmation and saves player state before replacing code.
 

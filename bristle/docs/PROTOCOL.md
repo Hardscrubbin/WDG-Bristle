@@ -67,6 +67,11 @@ restarts:
   "use a counter of at least this". The sender jumps there. A sync frame is checked for its tag but
   not for its counter: all it can do is move the other side's counter up, so replaying one does
   nothing. After a restart of either end, at most one exchange is lost before they agree again.
+- **An old frame changes nothing else.** A node sends to the bridge it last heard, and "heard"
+  means a frame that passed the counter check. The sync that answers an old frame goes to that
+  frame's sender and nowhere else; the sender is not taken for the bridge. (Up to firmware build 4
+  it was: a recorded frame, played back, made the node send to the replayer's address until it
+  gave the bridge up for lost, 20 s later. Fixed in build 5.)
 
 Counters never go back, also when a node is freed and adopted again.
 
@@ -150,6 +155,10 @@ core -> AUTH:cp=<core proof>
 - `owner id = HMAC(key, "bristle-owner-id")[:4]`
 
 Both sides prove they hold the key, so a node can't be taken over and a fake node can't inject data.
+A node answers every `HI` with a `HELLO` and keeps only the newest nonces. If the core has said `HI`
+more than once (no answer in time, or a hello still waiting in the bridge's mailbox), a `HELLO`
+whose proof fits an earlier `HI` of the same run is that node answering late: the core waits it out
+and answers the `HELLO` for its newest `HI`. Only a proof that fits none of them means another owner.
 Until the handshake completes, a node accepts only `HI`, `PING` and `IDENT`. A node with no owner
 also accepts `TIME`. An owned node takes its clock only from its authenticated owner, so nobody
 else on a link can shift its timestamps.
@@ -240,6 +249,13 @@ core drops duplicates by (node, seq). When flash fills, the oldest finds are dro
 In the heartbeat, `qb` is the exact number of finds the node holds, `qo` is the sequence number of
 the oldest one (`qn` when it holds none) and `qn` is the next number it will use. The core treats
 everything below `qo` as gone, so a gap never holds the ack up.
+
+**An ACK can be lost** like any other line (a damaged line, a lost frame, a node that restarted
+just before it arrived), and it gets no reply. So the core says its ack point again, even though
+it has not changed, whenever a heartbeat's `qo` is below it (the node still holds finds the core
+has), and after every new handshake. Not faster than the link's ack interval. Without this a quiet
+node resends the same finds for ever, and a node that restarted under the ACK is never acknowledged
+again: the core waits at the gap for `qo` to move, and `qo` waits for the ACK.
 
 **Time.** A find is stored with the time it was seen. If the node has no clock yet, it is stored with
 the boot number and the uptime, and gets its real time when the core sets the clock during that

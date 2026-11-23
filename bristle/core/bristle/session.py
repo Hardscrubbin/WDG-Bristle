@@ -120,6 +120,8 @@ class NodeSession:
     dropped_lines: int = 0
     usb_key: str = ""         # which USB device this is (set by the USB link; kept in Node Memory)
     _core_nonce: bytes = b""
+    _nonces: list = field(default_factory=list)      # every hello of this run, newest last
+    late_hellos: int = 0                             # answers to an earlier hello of the run: waited out
     _hello_at: float = 0.0
     _hello_tries: int = 0
     _last_hb: float = 0.0
@@ -148,10 +150,12 @@ class NodeSession:
     def start(self) -> None:
         """Begin (or restart) the handshake."""
         self._hello_tries = 0
+        self._nonces = []
         self._say_hi()
 
     def _say_hi(self) -> None:
         self._core_nonce = crypto.new_nonce()
+        self._nonces = (self._nonces + [self._core_nonce])[-8:]
         self.state = HELLO_WAIT
         self._hello_at = self.mono()
         self._hello_tries += 1
@@ -248,6 +252,13 @@ class NodeSession:
             return
         want = crypto.node_proof(self.owner_key, self._core_nonce, hw)
         if not crypto.proofs_equal(np, want):
+            if any(crypto.proofs_equal(np, crypto.node_proof(self.owner_key, nonce, hw))
+                   for nonce in self._nonces[:-1]):
+                # Our node, answering an earlier hello of this run: it was slow, or the hello waited
+                # in a buffer or in the bridge's mailbox. Its answer to the newest one follows (a
+                # node answers every hello), so this one is waited out. It is not another owner's.
+                self.late_hellos += 1
+                return
             self.state = NOT_OURS
             self.on_event("not_ours", self, {"oid": msg.get("oid", "")})
             return
@@ -267,6 +278,7 @@ class NodeSession:
         self._last_hb = self.mono()      # the silence timer starts now, not at the first heartbeat
         self._repeat_sent = self._channel_sent = None     # a node that restarted is told again
         self._busy_told = False
+        self.delivery.node(self.hwid).say_again()         # ...its ack point too: the last ACK may have missed it
         facts = dict(board=self.board, build=self.build, cap_5g=bool(self.caps & proto.HB_CAP_5G),
                      cap_ble=bool(self.caps & proto.HB_CAP_BLE), role=self.role)
         if self.usb_key and rec.usb_key != self.usb_key:

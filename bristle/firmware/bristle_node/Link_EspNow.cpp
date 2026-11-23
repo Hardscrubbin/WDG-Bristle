@@ -177,10 +177,11 @@ bool EspNowLink::send(const String& line) {
   return true;
 }
 
-bool EspNowLink::sendFrame(uint8_t kind, uint8_t frag, const uint8_t* payload, size_t len) {
+bool EspNowLink::sendFrame(uint8_t kind, uint8_t frag, const uint8_t* payload, size_t len, const uint8_t* to) {
   uint8_t frame[bp::FRAME_MAX_BYTES];
   size_t n = crypto::frameBuild(key_, kind, nextCounter(), frag, payload, len, frame, sizeof(frame));
-  return n && enow::send(haveBridge_ ? bridge_ : nullptr, frame, n);
+  if (!to && haveBridge_) to = bridge_;
+  return n && enow::send(to, frame, n);
 }
 
 int EspNowLink::flush(int budget) {
@@ -265,9 +266,11 @@ void EspNowLink::handle(const enow::Rx& rx, uint32_t now) {
       lastSync_ = now;
       uint8_t floor[4] = {(uint8_t)rxFloor_, (uint8_t)(rxFloor_ >> 8), (uint8_t)(rxFloor_ >> 16),
                           (uint8_t)(rxFloor_ >> 24)};
-      memcpy(bridge_, rx.mac, 6);
-      haveBridge_ = true;
-      sendFrame(bp::FRAME_KIND_SYNC, 0x01, floor, 4);
+      // The answer goes to whoever sent the old frame, and only this answer: a core whose counter
+      // fell behind catches up with it. The sender is NOT taken for the bridge. An old frame is
+      // one anybody could have recorded and played back, and up to build 4 the node then sent
+      // everything to that address until it gave the bridge up for lost (20 s).
+      sendFrame(bp::FRAME_KIND_SYNC, 0x01, floor, 4, rx.mac);
     }
     return;
   }

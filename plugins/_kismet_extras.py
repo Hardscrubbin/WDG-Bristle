@@ -424,6 +424,33 @@ def plan_cards(sources, locks=None, busy=None) -> dict:
     return done({hopping[i]["uuid"]: by_index[i] for i in range(len(hopping))}, why)
 
 
+def stop_report(used, forced, results, already=()) -> list:
+    """[bristle] 1.2.1. What to say when a Kismet run ends: which Wi-Fi cards went back to managed
+    mode and which were left as they were. Plain lines for the terminal.
+
+    ``used``: every Wi-Fi interface the run captured with. ``forced``: the ones the game put into
+    monitor mode itself. ``results``: {interface: (back in managed mode?, reason if not)}.
+    ``already``: forced ones that were in monitor mode before the run touched them."""
+    lines = []
+    back = [iface for iface in forced if results.get(iface, (True, ""))[0]]
+    stuck = [iface for iface in forced if not results.get(iface, (True, ""))[0]]
+    left = [iface for iface in used if iface not in forced]
+    if back:
+        lines.append("Back in managed mode and handed back to NetworkManager: %s" % ", ".join(back))
+    for iface in back:
+        if iface in already:
+            lines.append("%s was already in monitor mode before this run; it is in managed mode now" % iface)
+    for iface in stuck:
+        reason = results[iface][1] or "no reason given"
+        lines.append("STILL IN MONITOR MODE: %s (%s). By hand: sudo iw dev %s set type managed" % (iface, reason, iface))
+    if left:
+        lines.append("Left as they were: %s (monitor mode was not switched on for %s in the picker)" % (
+            ", ".join(left), "it" if len(left) == 1 else "them"))
+    if not lines and not used:
+        lines.append("No Wi-Fi card was in this run: nothing to switch back")
+    return lines
+
+
 def picker_sources(cards) -> list:
     """Sources in the form plan_cards takes, from what the picker knows before Kismet runs:
     ``cards`` is [(id, name, channels)], channels as parse_iw_channels gives them."""

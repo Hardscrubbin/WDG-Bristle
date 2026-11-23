@@ -3,7 +3,11 @@
 Real boards only. **Nothing below has run on a board or on the uConsole: every "expect" is what
 the code is written to do, not something that was seen.** Write what you saw into the tables.
 
-Firmware: `firmware/releases/v1-build4-dev/`. Game: `WDG Main\dist\wdg-bristle.zip` (WDG-Bristle 1.2).
+Firmware: `firmware/releases/v1-build5-dev/`. Game: `WDG Main\dist\wdg-bristle.zip` (WDG-Bristle 1.2.1).
+
+Build 5 is build 4 with one fix (a replayed ESP-NOW frame: `RELEASE_NOTES.md` in the release
+folder). If you have already flashed build 4 on a board, it works with this game as it is; update
+it over the air in F2, where you then see the build number change from 4 to 5.
 
 ## The order
 
@@ -12,7 +16,7 @@ The checkpoints are in the order that wastes the least time, not in letter order
 | # | Checkpoint | What it proves | Time |
 |---|---|---|---|
 | 1 | **A** | the firmware starts, its self-test passes, the board's LED and BOOT pin are right | 20 min |
-| 2 | **R** | WDG-Bristle 1.2 installs, brings your data over from an earlier install, and everything from before still works; the Kismet channel lock and split (R12 to R15) | 45 min |
+| 2 | **R** | WDG-Bristle 1.2.1 installs, brings your data over from an earlier install, and everything from before still works; the Kismet channel lock and split (R12 to R15); the K kill switch as it is marked now (R17) | 50 min |
 | 3 | **B** | nodes over USB in the game: adopt, scan, finds in loot and on the map | 45 min |
 | 4 | **F1** | the game flashes a blank board | 10 min |
 | 5 | **D** | the ESP-NOW bridge, in the house, then in the car | 1 h |
@@ -41,7 +45,7 @@ data cables.
 | # | Do | Expect |
 |---|---|---|
 | A1 | Flash the FULL image at **0x0 with erase** (`FLASHING.md`, B). Folder: `xiao_c5` for the XIAO; `devkit_c5` for a C5 board on its native USB port; `devkit_c5_uart` for a board whose only USB port is a CH343/UART chip. | esptool or the web flasher ends without an error. |
-| A2 | Open the console at 115200, press RESET. (A native-USB board drops the port for a moment: reconnect; if the line went by, type `version`.) | One line, with no WARNING in it: `# Bristle node build 4 (<board>), hw <12 hex>, no owner yet`. Then, once a second, a line starting `BCN:hw=`. |
+| A2 | Open the console at 115200, press RESET. (A native-USB board drops the port for a moment: reconnect; if the line went by, type `version`.) | One line, with no WARNING in it: `# Bristle node build 5 (<board>), hw <12 hex>, no owner yet`. Then, once a second, a line starting `BCN:hw=`. |
 | A3 | Type `selftest`. | 15 lines starting `# PASS` (crc16, encode, encode2, plan_hash, plan_short, owner_id, node_proof, core_proof, frame, frame_poll, frame_piece, frame_open, frame_tamper, base64url, roundtrip), then `# SELFTEST PASS`. The `BCN:` lines stop for a minute. |
 | A4 | Type `status`. | Among the lines: `# flash layout ok (app slot 2560 KB, queue 2944 KB)`, `# clock not set (...)`, `# role node, firmware update: no update in progress`. |
 | A5 | Type `queue`. | `holding 0 finds`, a flash total of about 2944 KB, and `since this boot: finds written to flash 0 times`. |
@@ -52,7 +56,7 @@ data cables.
 | Step | XIAO | Other C5 | Notes |
 |---|---|---|---|
 | A1 flash | | | |
-| A2 banner (build 4, no WARNING) and BCN lines | | | |
+| A2 banner (build 5, no WARNING) and BCN lines | | | |
 | A3 selftest (15 PASS) | | | |
 | A4 flash layout ok | | | |
 | A5 queue | | | |
@@ -65,7 +69,7 @@ is not needed for this list.)
 
 ---
 
-## 2. Checkpoint R: WDG-Bristle 1.2 installed from the zip
+## 2. Checkpoint R: WDG-Bristle 1.2.1 installed from the zip
 
 **Plug in:** nothing new. Your current install is not changed by any step here: it stays as the
 rollback.
@@ -95,6 +99,7 @@ unzip -o wdg-bristle.zip && cd ~/wdg-bristle && ./install.sh
 | R14 | With a card locked and the nodes scanning: look at the line under the coverage strip on the Nodes screen. Then unplug the locked card. | `Kismet stays mostly on 6: nodes give those channels the shortest dwell`. After the unplug: the other cards get channel 6 back (`Channels split ...` again in the terminal, no `stays on channel 6`), and within about a minute the nodes' line goes back to `Kismet hops N channels evenly`. |
 | R15 | (Optional) Close the game. In `kismet_adapters.json` set `"wifi_locks"` for one card's MAC to a channel it cannot tune (`"100"` for a 2.4 GHz only card). Start, open the picker, start the wardrive. | Picker: `<card>: cannot tune channel 100: it will hop instead`. Terminal at the start: `<card> cannot tune channel 100 -- the lock is dropped for this run and it hops like the others`. The card captures and hops. |
 | R16 | SYSTEM > Firmware C5/SOLO. Do not flash. | The screen as before. No line about an unfinished install (there is none). If you ever see `A FIRMWARE WRITE DID NOT FINISH` there, press **F** and send me the page and the lines it prints in OUTPUT before pressing anything else. |
+| R17 | **The K kill switch, as it is marked since 1.2.1.** Start a Kismet wardrive with two Wi-Fi cards ticked, monitor mode (**M**) on for one of them only. Look at the terminal, then at the map, then at TAB > PLUGINS. Press **K** on the map. Then `iw dev` in a terminal. | Terminal at the start, once: `[KISMET] Kismet running. Press K anywhere to stop and turn monitor mode off`. On the map, at the left edge under the top bar, a small box: `K: stop Kismet`; it is gone when Kismet is not capturing. PLUGINS: `Kismet: Stop (or K anywhere)`. After **K**: `[KISMET] Back in managed mode and handed back to NetworkManager: <the card with M>` and `[KISMET] Left as they were: <the other card> (monitor mode was not switched on for it in the picker)`. `iw dev`: the first card says `type managed`, and normal Wi-Fi works again without a reboot. If a card would not switch back you get `STILL IN MONITOR MODE: <card> (...)` with the command to do it by hand: send me that line. Tell me if the box on the map sits on top of anything. |
 
 | Step | Result | Notes |
 |---|---|---|
@@ -114,6 +119,7 @@ unzip -o wdg-bristle.zip && cd ~/wdg-bristle && ./install.sh
 | R14 nodes count the locked channel as covered; unplug gives it back | | |
 | R15 a channel the card cannot tune (optional) | | |
 | R16 firmware screen, nothing pending | | |
+| R17 K kill switch: the label, the start line, the menu entry, the cards listed at stop | | |
 
 ---
 
@@ -132,7 +138,7 @@ board too, if you use one.
 | B6 | `tail -n 5 ~/wdg-bristle/loot/<today's session>/wardriving.csv` | Rows with real coordinates, none at 0,0. |
 | B7 | Press **S** to stop. Then start a Kismet wardrive; stop it. | With `tie_to_kismet = on`: the nodes start with Kismet and stop with it. After a nodes-only run that wrote rows: `This drive's wardriving.csv is in the WiGLE upload queue`. |
 | B8 | While scanning: pull the hub's cable from the uConsole for a minute, plug it back. | Both nodes come back online by themselves, their backlog arrives, "on nodes" goes back to 0. No network twice in wardriving.csv. |
-| B9 | While scanning: press RESET on one node. | It comes back with the same number and keeps scanning. |
+| B9 | While scanning: press RESET on one node. Watch the terminal and the "on nodes" count for a minute. | Terminal: `Node n restarted or dropped the link: connecting again` (or `went quiet ... reconnecting`), then `Node n online over USB`. No line with `refused` in it. It comes back with the same number and keeps scanning. "On nodes" goes back to 0 within a minute and stays there when you stop scanning. (Before 1.2.1 an ACK that missed the restarting node was never repeated, and that count would have stayed up for good.) |
 | B10 | Plug in a Biscuit or a Piglet. Press **A** on its `NEW PORT` row, then **X**. | It never becomes a node. After **A**: `did not answer: not a Bristle node`. After **X**: gone for good. |
 | B11 | **I** on a node. **P** a few times. **R** twice. | Its LED blinks 10 s. The pin cycles and the channel column follows. Nodes are renumbered 1..N. |
 | B12 | On the map press **F8** twice. Quit and start the game. | The small line (bottom left) goes away and comes back; the game remembered the setting. |
@@ -174,8 +180,8 @@ board too, if you use one.
 | # | Do | Expect |
 |---|---|---|
 | F1.1 | Nodes screen. | A `NEW PORT` row for the blank board. |
-| F1.2 | Select it, press **W**. | A box: the port, `Board: < ... >`, `ERASES THE WHOLE BOARD`, `Image: v1-build4-dev`. |
-| F1.3 | **LEFT/RIGHT** until the board type is right. **ENTER**. | `Flashing <port>: erasing ...`, then `writing ...` with esptool's progress; about a minute. Then `<port> now holds v1-build4-dev`. |
+| F1.2 | Select it, press **W**. | A box: the port, `Board: < ... >`, `ERASES THE WHOLE BOARD`, `Image: v1-build5-dev`. |
+| F1.3 | **LEFT/RIGHT** until the board type is right. **ENTER**. | `Flashing <port>: erasing ...`, then `writing ...` with esptool's progress; about a minute. Then `<port> now holds v1-build5-dev`. |
 | F1.4 | Wait a few seconds. | The board shows up as a `NEW` row. **A** adopts it as node 3. |
 | F1.5 | Select node 1 (on USB), press **W**. | The box says `Writes the app only: owner, number, settings and stored finds are kept.` **ENTER**: after the flash node 1 comes back online as node 1 without adopting. |
 | F1.6 | Try **W** on the JanOS board's row, if it has one. | There is none to select if you marked it "not a node". If the game holds it as its own ESP32: `... is the game's own ESP32: not flashed`. |
@@ -258,18 +264,19 @@ reach, or unplug the bridge for this test. Kismet must not have `hci0` ticked.
 
 ## 7. Checkpoint F2: updates over the air
 
-There is only build 4, so the update sends build 4 again. That proves the transfer, the check and
-the switch to the other slot. (When there is a build 5, the same steps show the build number change.)
+Boards flashed with build 5 get build 5 again: that proves the transfer, the check and the switch
+to the other slot. A board you flashed with build 4 earlier shows the build number change from 4
+to 5 in the same steps.
 
 **Plug in:** node 1 on the hub (USB); node 2 through the bridge; node 3 over Bluetooth.
 
 | # | Do | Expect |
 |---|---|---|
-| F2.1 | Select node 1 (USB), **U** twice. | `Updating node 1 to build 4 over USB`. STATE `upd n%` rising. About a minute. Then `Node 1 has the new image and is restarting`, and within a few seconds `Node 1 now runs build 4`. Its STATE may show `new build` for a moment. |
+| F2.1 | Select node 1 (USB), **U** twice. | `Updating node 1 to build 5 over USB`. STATE `upd n%` rising. About a minute. Then `Node 1 has the new image and is restarting`, and within a few seconds `Node 1 now runs build 5`. Its STATE may show `new build` for a moment. |
 | F2.2 | On node 1's console: `update`. | `no update in progress` with no "ON TRIAL" in it: the image was confirmed. |
 | F2.3 | Select node 2 (ESP-NOW), **U** twice. | The same, slower: I expect 3 to 5 minutes. **Write down the time.** The node does not scan meanwhile. |
 | F2.4 | Select node 3 (Bluetooth), **U** twice. | The same; write down the time. |
-| F2.5 | **Cut one off.** Start an update of node 1 over USB and pull its cable at about 50%. Plug it back. | `Node 1 update failed: the link closed during the update: the node keeps its old firmware`. Node 1 comes back online on build 4 and scans. Its console `update` says `last update dropped: its link closed`. |
+| F2.5 | **Cut one off.** Start an update of node 1 over USB and pull its cable at about 50%. Plug it back. | `Node 1 update failed: the link closed during the update: the node keeps its old firmware`. Node 1 comes back online on the build it had and scans. Its console `update` says `last update dropped: its link closed`. |
 | F2.6 | Start an update and press **U** twice at about 30%. | `Update stopped: node n keeps its old firmware`. |
 | F2.7 | **Rollback.** Update node 2 over ESP-NOW. The moment the messages say it is restarting, quit the game and leave it off for 6 minutes. Watch node 2's console. | After the restart: `update`: `THIS BUILD IS ON TRIAL`. About 5 minutes later the console prints `new firmware not confirmed: going back to the previous build` and the board restarts. Start the game: node 2 comes online; the trial is over. |
 | F2.8 | Update the bridge (select its row, **U** twice). | It updates over USB like a node and comes back as the bridge; the wireless nodes drop for a moment and return. |

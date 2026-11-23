@@ -19,7 +19,7 @@ Nodes folder).
 | Compiler and C library | Espressif `riscv32-esp-elf` GCC 14.2.0 with newlib |
 
 The list below was read from the linker map of the `xiao_c5` image of build 2: every library archive
-the linker took code from. Build 3 is the same source and libraries. Build 4 is built with the same core and libraries and links more of them (ESP-NOW, `libespnow.a`, which is part of Espressif's Wi-Fi libraries in ESP-IDF; the update functions of `app_update`; the server side of NimBLE): the map file of its XIAO image lists 68 archives, all from the components in the table. The other two targets are built from the same sketch, core and libraries
+the linker took code from. Build 3 is the same source and libraries. Build 4 is built with the same core and libraries and links more of them (ESP-NOW, `libespnow.a`, which is part of Espressif's Wi-Fi libraries in ESP-IDF; the update functions of `app_update`; the server side of NimBLE): the map file of its XIAO image lists 68 archives, all from the components in the table. Build 5 is build 4 with a few changed lines in one of Bristle's own files, built with the same core, libraries and settings. The other two targets are built from the same sketch, core and libraries
 with a different board setting.
 
 ## Components in the image

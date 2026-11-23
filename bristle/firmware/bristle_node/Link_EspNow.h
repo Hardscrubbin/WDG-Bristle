@@ -59,7 +59,8 @@ class EspNowLink : public Link {
  private:
   uint32_t nextCounter();
   bool accept(uint32_t ctr);
-  bool sendFrame(uint8_t kind, uint8_t frag, const uint8_t* payload, size_t len);
+  // `to`: one address for this frame only; nullptr = the bridge, or everyone while it is not known.
+  bool sendFrame(uint8_t kind, uint8_t frag, const uint8_t* payload, size_t len, const uint8_t* to = nullptr);
   int flush(int budget);                             // frames sent
   void handle(const enow::Rx& rx, uint32_t now);
   void lines(const uint8_t* payload, size_t len);

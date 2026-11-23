@@ -3,7 +3,7 @@
 Every grey block can be copied and pasted whole into a terminal on the uConsole.
 Run everything as your normal user. The installer asks for `sudo` itself.
 
-**What this is.** WDG-Bristle 1.2: Watch Dogs Go (base 0.9.21.3) with the Kismet wardriving bridge,
+**What this is.** WDG-Bristle 1.2.1: Watch Dogs Go (base 0.9.21.3) with the Kismet wardriving bridge,
 dual-GPS through gpsd with a health screen, a Hardware Check screen, Kismet on two Wi-Fi adapters,
 ADS-B tracks + KML, 433 capture to Flipper `.sub`, 433 Hunter, loot backup/restore, session log,
 WDGWars pairing + status, an offline-basemap layer, and **Bristle Nodes**: a fleet of ESP32-C5
@@ -198,9 +198,14 @@ Do these in order. Each one says what you should see.
    follows the GP-02. Plug it back in: `is reporting again`.
 5. **PLUGINS > Kismet: Self-Test**, then **Kismet: Configure & Start.** Tick the Alfa (and the AC1200
    if you use it). With two Wi-Fi adapters the picker shows `Channel split ON`. Start.
-6. **Watch the terminal** for `Channels split between the adapters` (two adapters) and for
-   `Two GPS receivers: Kismet reads only the one in use`.
+6. **Watch the terminal** for `Channels split between the adapters` (two adapters), for
+   `Two GPS receivers: Kismet reads only the one in use`, and for
+   `Kismet running. Press K anywhere to stop and turn monitor mode off`. While Kismet captures, the
+   map shows a small `K: stop Kismet` box at its left edge.
 7. **Drive or walk a few minutes**, then press **K** on the map to stop. The game must not freeze.
+   The terminal lists which Wi-Fi cards went `Back in managed mode` and which were
+   `Left as they were`. A card it could not switch back is named with `STILL IN MONITOR MODE` and
+   the command to do it by hand.
 8. **PLUGINS > Kismet: Upload to WiGLE.net.** `Uploaded to WiGLE.net`; check your wigle.net uploads.
 9. **SYSTEM > SDR on**, then **ADDONS > ADS-B Radar**; later **PLUGINS > ADS-B: Tracks & Coverage > E**
    writes `adsb_tracks.kml`. Stop ADS-B, then try **PLUGINS > 433: Hunter > S** with a remote.

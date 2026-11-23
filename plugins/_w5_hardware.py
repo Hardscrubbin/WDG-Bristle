@@ -154,6 +154,15 @@ def _phy_supports_monitor(iface):
     return "* monitor" in block[1].split("Supported", 1)[0]
 
 
+def is_monitor(iface):
+    """[bristle] True when the interface is in monitor mode right now, False when it is not, None
+    when that cannot be read. Read only."""
+    rc, info, _ = _run(["iw", "dev", iface, "info"])
+    if rc != 0 or not info:
+        return None
+    return "type monitor" in info
+
+
 def phy_info(iface):
     """[bristle] The text of `iw phy <phy> info` for this interface ("" when it cannot be read).
     It lists every frequency the card can tune; plugins/_kismet_extras.parse_iw_channels reads it.

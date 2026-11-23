@@ -35,4 +35,4 @@
 #endif
 
 // Firmware build number: bump on every release (reported in HELLO and HB as b=).
-#define BRISTLE_BUILD 4
+#define BRISTLE_BUILD 5
