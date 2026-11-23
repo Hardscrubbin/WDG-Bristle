@@ -17,6 +17,9 @@ void load(NodeState& s) {
   s.session = prefs.getULong("sess", 0);
   s.repeatApMs = prefs.getULong("rap", 0);
   s.repeatBleMs = prefs.getULong("rble", 0);
+  s.role = prefs.getUChar("role", 0);
+  s.channel = prefs.getUChar("ech", 255);
+  if (s.channel == 255) s.channel = 1;   // bp::ESPNOW_CONTROL_CHANNEL until the core says otherwise
 }
 
 void saveOwner(const NodeState& s) {
@@ -32,6 +35,20 @@ void saveRun(uint8_t mask, uint32_t session) {
 void saveRepeat(uint32_t ap, uint32_t ble) {
   prefs.putULong("rap", ap);
   prefs.putULong("rble", ble);
+}
+
+void saveRole(uint8_t role) { prefs.putUChar("role", role); }
+void saveChannel(uint8_t channel) { prefs.putUChar("ech", channel); }
+
+uint32_t reserveFrameCounters(uint32_t atLeast, uint32_t block) {
+  uint32_t end = prefs.getULong("ectx", 0);
+  uint32_t start = end > atLeast ? end : atLeast;
+  prefs.putULong("ectx", start + block);
+  return start;
+}
+uint32_t frameFloor() { return prefs.getULong("ecrx", 0); }
+void burnFrameFloor(uint32_t floor) {
+  if (floor > prefs.getULong("ecrx", 0)) prefs.putULong("ecrx", floor);
 }
 
 void forgetAll() {

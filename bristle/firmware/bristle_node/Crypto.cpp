@@ -99,4 +99,26 @@ size_t frameBuild(const uint8_t key[16], uint8_t kind, uint32_t ctr, uint8_t fra
   return total;
 }
 
+bool frameShape(const uint8_t* data, size_t len) {
+  if (len < (size_t)bp::FRAME_HEADER_BYTES + bp::FRAME_TAG_BYTES || len > bp::FRAME_MAX_BYTES) return false;
+  if (data[0] != bp::FRAME_MAGIC0 || data[1] != bp::FRAME_MAGIC1 || data[2] != bp::PROTOCOL_VERSION) return false;
+  return len == (size_t)bp::FRAME_HEADER_BYTES + data[9] + bp::FRAME_TAG_BYTES;
+}
+
+bool frameOpen(const uint8_t key[16], const uint8_t* data, size_t len, uint8_t& kind, uint32_t& ctr, uint8_t& frag,
+               const uint8_t*& payload, size_t& plen) {
+  if (!frameShape(data, len)) return false;
+  plen = data[9];
+  const uint8_t* parts[] = {(const uint8_t*)bp::FRAME_HMAC_LABEL, data};
+  size_t lens[] = {strlen(bp::FRAME_HMAC_LABEL), bp::FRAME_HEADER_BYTES + plen};
+  uint8_t h[32];
+  hmacSha256(key, bp::AUTH_KEY_BYTES, parts, lens, 2, h);
+  if (!equalCT(h, data + bp::FRAME_HEADER_BYTES + plen, bp::FRAME_TAG_BYTES)) return false;
+  kind = data[3];
+  ctr = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+  frag = data[8];
+  payload = data + bp::FRAME_HEADER_BYTES;
+  return true;
+}
+
 }  // namespace crypto

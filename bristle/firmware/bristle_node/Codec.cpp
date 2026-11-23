@@ -110,7 +110,63 @@ LineOut& LineOut::addRaw(const char* key, const String& value) {
   return *this;
 }
 
-String LineOut::finish() const {
+String LineOut::finish() const { return withCrc(s_); }
+
+String stripCrc(const String& line) {
+  int end = line.length();
+  while (end > 0 && (line[end - 1] == '\n' || line[end - 1] == '\r')) end--;
+  if (end >= 5 && line[end - 5] == '*') end -= 5;
+  return line.substring(0, end);
+}
+
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+String b64urlEncode(const uint8_t* data, size_t len) {
+  String out;
+  out.reserve((len * 4 + 2) / 3);
+  for (size_t i = 0; i < len; i += 3) {
+    uint32_t v = (uint32_t)data[i] << 16;
+    if (i + 1 < len) v |= (uint32_t)data[i + 1] << 8;
+    if (i + 2 < len) v |= data[i + 2];
+    out += B64[(v >> 18) & 63];
+    out += B64[(v >> 12) & 63];
+    if (i + 1 < len) out += B64[(v >> 6) & 63];
+    if (i + 2 < len) out += B64[v & 63];
+  }
+  return out;
+}
+
+static int b64v(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '-') return 62;
+  if (c == '_') return 63;
+  return -1;
+}
+
+bool b64urlDecode(const String& text, uint8_t* out, size_t cap, size_t& len) {
+  len = 0;
+  size_t n = text.length();
+  if (n % 4 == 1) return false;
+  for (size_t i = 0; i < n; i += 4) {
+    int v[4] = {0, 0, 0, 0};
+    size_t have = n - i < 4 ? n - i : 4;
+    for (size_t k = 0; k < have; k++) {
+      v[k] = b64v(text[i + k]);
+      if (v[k] < 0) return false;
+    }
+    uint32_t w = ((uint32_t)v[0] << 18) | ((uint32_t)v[1] << 12) | ((uint32_t)v[2] << 6) | (uint32_t)v[3];
+    size_t bytes = have - 1;
+    if (len + bytes > cap) return false;
+    out[len++] = (uint8_t)(w >> 16);
+    if (bytes > 1) out[len++] = (uint8_t)(w >> 8);
+    if (bytes > 2) out[len++] = (uint8_t)w;
+  }
+  return true;
+}
+
+String withCrc(const String& s_) {
   uint16_t c = crc16((const uint8_t*)s_.c_str(), s_.length());
   String out = s_;
   out += '*';
@@ -161,9 +217,9 @@ bool parseBody(const char* body, size_t len, Msg& out) {
   return true;
 }
 
-bool parseLine(const char* line, size_t len, Msg& out) {
+bool parseLine(const char* line, size_t len, Msg& out, size_t maxBytes) {
   while (len && (line[len - 1] == '\r' || line[len - 1] == '\n')) len--;
-  if (len + 1 > bp::LINE_MAX_BYTES || len < 6) return false;
+  if (len + 1 > (maxBytes ? maxBytes : (size_t)bp::LINE_MAX_BYTES) || len < 6) return false;
   if (line[len - 5] != '*') return false;
   int h[4];
   for (int i = 0; i < 4; i++) {

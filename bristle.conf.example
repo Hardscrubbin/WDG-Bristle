@@ -5,9 +5,28 @@
 # Channel set: U = United States (2.4 GHz 1-11, 5 GHz 36-165), E = Europe (1-13, 36-140)
 region = U
 
-# The ONE Bluetooth adapter kept for Bristle (used by the Bluetooth link, a later step).
+# ---------------------------------------------------------------- links
+
+# The ONE Bluetooth adapter kept for Bristle. Nodes placed away from the uConsole are linked over it.
 # Kismet must not be given this adapter: PLUGINS > Hardware Check warns if it is.
 ble_adapter = hci0
+
+# Link nodes over Bluetooth LE on that adapter. off = USB and the ESP-NOW bridge only. on / off
+ble_link = on
+
+# How many nodes are linked over Bluetooth at once (an adapter carries about 7 links; 1-7).
+# The Nodes screen says when more nodes are in range than this.
+ble_max_links = 5
+
+# How nodes scan for Bluetooth LE devices.
+# active  = the normal scan: they also ask each device for its scan response, which is where many
+#           device names are. Nothing is ever connected to or paired with.
+# passive = they only listen (they transmit nothing to the devices they hear): fewer names.
+ble_scan = active
+
+# ESP-NOW control channel (1-13): where nodes meet the bridge. Nodes and the bridge are told.
+# Not 6: Piglet and Biscuit meshes use 6.
+control_channel = 1
 
 # Start and stop the nodes together with a Kismet wardrive (PLUGINS > Kismet). on / off
 tie_to_kismet = on
@@ -17,7 +36,8 @@ hud = on
 hud_key = F8
 
 # A new ESP32 serial port is only listed on the Nodes screen; you press A to say hello to it.
-# on = say hello to new ESP32 ports by itself (never to excluded or "not a node" ones).
+# (A board that announces itself as a Bristle board is greeted without asking; adopting is still yours.)
+# on = say hello to every new ESP32 port by itself (never to excluded or "not a node" ones).
 auto_probe = off
 
 # Serial ports Bristle must never touch, comma separated (for example /dev/ttyACM0).
@@ -27,10 +47,56 @@ exclude_ports =
 # More USB chips to treat as ESP32 boards, as vid:pid in hex, comma separated (for example 1a86:55d4)
 extra_usb_ids =
 
-# How long before a node reports the same access point / Bluetooth device again (seconds)
+# How long before a node reports the same access point / Bluetooth device again (seconds).
+# Sent to every node.
 repeat_ap_s = 300
 repeat_ble_s = 30
 
-# For the ESP-NOW bridge (a later step): the bridge board's serial port and the control channel
-bridge_port =
-control_channel = 1
+# Where the node firmware releases are. Empty = bristle/firmware/releases in this folder.
+firmware_dir =
+
+# ---------------------------------------------------------------- nearby alerts
+# Each kind can be switched here or on PLUGINS > Bristle: Alerts. on / off
+
+# A device seen again and again at places far apart
+alert_follow = on
+# AirTag / Tile / SmartTag type trackers
+alert_tracker = on
+alert_axon = on
+alert_flock = on
+# Other wardriving and pentest devices
+alert_pentest = on
+# Bristle boards that are not yours
+alert_rig = on
+# A possible skimmer with a high score, close by
+alert_skimmer = on
+# Kismet's own alerts (the ones named in kismet_alerts)
+alert_kismet = on
+alert_sound = on
+
+# Kismet alerts to show. Take a name out of the list to switch that one off.
+kismet_alerts = DEAUTHFLOOD,BCASTDISCON,DISCONCODEINVALID,DEAUTHCODEINVALID,APSPOOF,BSSTIMESTAMP,CHANCHANGE,ADVCRYPTCHANGE,DOT11KARMA,KARMAOUI,WPSBRUTE,NONCEDEGRADE,NONCEREUSE,AIRJACKSSID,CRYPTODROP
+
+# Following: a device counts as following when it is seen at follow_sightings places, each at least
+# follow_distance_m metres from the others, within follow_window_min minutes, with at least
+# follow_min_minutes between the first and the last.
+follow_distance_m = 500
+follow_window_min = 60
+follow_sightings = 3
+follow_min_minutes = 10
+
+# Your own devices (Piglets, Biscuits, your phone): MACs, comma separated. Never alerted on.
+ignore_macs =
+
+# ---------------------------------------------------------------- possible skimmers (listening only)
+
+# Alert only when the score is at least this (0-100) AND the signal is at least this strong (dBm).
+# Every scored sighting is logged to loot/skimmers either way.
+skimmer_alert_score = 60
+skimmer_alert_rssi = -70
+
+# A Bluetooth adapter hunt mode may listen with (a passive scan: it only receives).
+# Empty = none: the hunt uses the readings Kismet and the nodes give.
+# hci0 = Bristle's own adapter. hci1 (or another adapter Kismet uses) = it is borrowed from Kismet
+# for the hunt and given back when the hunt ends.
+hunt_adapter =

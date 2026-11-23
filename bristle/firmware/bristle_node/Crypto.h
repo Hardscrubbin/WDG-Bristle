@@ -16,5 +16,11 @@ void coreProof(const uint8_t key[16], const uint8_t nodeNonce[16], const uint8_t
 // Builds an ESP-NOW frame into out (returns length, 0 on error).
 size_t frameBuild(const uint8_t key[16], uint8_t kind, uint32_t ctr, uint8_t frag, const uint8_t* payload,
                   size_t plen, uint8_t* out, size_t outCap);
+// Checks an ESP-NOW frame's shape and its tag. On true: kind, ctr, frag, and payload/plen pointing
+// into data. The counter is NOT checked here (Link_EspNow does that).
+bool frameOpen(const uint8_t key[16], const uint8_t* data, size_t len, uint8_t& kind, uint32_t& ctr, uint8_t& frag,
+               const uint8_t*& payload, size_t& plen);
+// Only the shape (magic, version, lengths): what a bridge, which checks no tags, relays.
+bool frameShape(const uint8_t* data, size_t len);
 
 }  // namespace crypto

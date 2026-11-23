@@ -38,11 +38,14 @@ def detect_esp32_port() -> Optional[str]:
     candidates = list_usb_serial_devices()
     esp = [c for c in candidates if c[2]]  # is_esp32 == True
     # [bristle] A Bristle node looks exactly like the game's own XIAO on USB. Boards that are in
-    # Node Memory are never taken as "the ESP32" (plugins/_bristle/wdg_ports.py).
+    # Node Memory are never taken as "the ESP32", and neither is a Bristle board that has not been
+    # adopted yet: it announces itself with a beacon line, which is listened for here. Nothing is
+    # written to any port to find that out (plugins/_bristle/wdg_ports.py).
     try:
         from plugins._bristle import wdg_ports
         nodes = wdg_ports.node_devices()
         esp = [c for c in esp if c[0] not in nodes]
+        esp = [c for c in esp if not wdg_ports.is_bristle_board(c[0])]
     except Exception:
         pass
     if esp:

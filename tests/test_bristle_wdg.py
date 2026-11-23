@@ -480,14 +480,16 @@ class PluginFile(unittest.TestCase):
         plugin = core.BristleNodes()
         self.assertTrue(core.BristleNodes.BACKGROUND_TICK)
         self.assertEqual(plugin.NAME, "Bristle: Nodes")
-        self.assertEqual([(i.key, i.action) for i in plugin.menu_items()], [("n", "open_overlay")])
+        self.assertEqual([(i.key, i.action) for i in plugin.menu_items()],
+                         [("n", "open_overlay"), ("e", "open_alerts"), ("m", "open_suspects")])
         self.assertTrue(callable(plugin.draw_map_overlay))
         self.assertFalse(plugin.overlay_active)
         plugin.on_update()                                                    # not started: nothing happens
         plugin.on_unload()
 
     def test_game_thread_code_never_touches_a_serial_port_or_sleeps(self):
-        for name in ("bristle_core.py", "_bristle/screen.py", "_bristle/ingest.py"):
+        for name in ("bristle_core.py", "_bristle/screen.py", "_bristle/screen_more.py", "_bristle/ingest.py",
+                     "_bristle/host.py"):
             text = (ROOT / "plugins" / name).read_text(encoding="utf-8")
             for banned in ("import serial", "time.sleep(", "ser.write", "open("):
                 self.assertNotIn(banned, text, "%s: %s" % (name, banned))

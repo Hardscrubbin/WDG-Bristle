@@ -18,6 +18,10 @@ void onMessage(Link& link, const codec::Msg& m);   // a valid protocol line arri
 void badLine();                                    // a line with a bad CRC or too long arrived
 
 void forgetEverything(const char* why);         // free the node: owner, number, plan, queue
+void linkClosed(Link& link);                    // a link went away (its own code noticed)
+void updateChanged();                           // a firmware update started or ended
+void consoleUsed();                             // someone typed a console command
+bool isBridge();
 void identify(uint32_t seconds);                // blink the LED
 
 // For the console.

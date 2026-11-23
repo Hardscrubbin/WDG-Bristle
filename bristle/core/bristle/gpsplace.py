@@ -4,6 +4,14 @@ Feed it fresh, measured fixes (WDG v3's wardrive_sample path). Each find carries
 `place(t)` returns the position at that time, interpolated between the two surrounding fixes when
 they're close enough, else the nearest fix within the allowed age, else None (hold or drop the find,
 following WDG's Kismet-plugin rules). Never returns 0,0 or an invalid coordinate.
+
+Times. A node's clock is this core's clock, as it was when the core last set it. If the core's
+clock is corrected mid-drive (GPS or NTP), finds stamped before the correction and fixes measured
+after it would no longer line up. So the track is not kept on the wall clock: every fix is stored
+on "track time", which runs with the monotonic clock and never jumps, and ClockMap remembers which
+wall-clock offset was in force when. A find's time goes through ClockMap.to_track() first.
+Track time starts out equal to the wall clock, so a track saved to disk still means something to
+a later run of the game.
 """
 from __future__ import annotations
 
@@ -73,3 +81,73 @@ class GpsTrack:
             return Fix(t, lat, lon, None, max(before.acc or 0, after.acc or 0) or None)
         best = min((f for f in (before, after) if f is not None), key=lambda f: abs(f.t - t))
         return best if abs(best.t - t) <= self.max_nearest else None
+
+
+@dataclass
+class Epoch:
+    """A stretch of track time during which the wall clock read (track time + delta)."""
+    start: float
+    end: float
+    delta: float
+
+
+class ClockMap:
+    """Turns wall-clock times (what a node stamps on a find) into track time.
+
+    note(mono, wall) is called often with both clocks. While they move together nothing happens.
+    When the wall clock jumps by more than ``jump_s`` a new epoch starts. to_track(t) looks for the
+    epoch whose wall-clock span holds t; a node keeps the old clock for a moment after a jump (until
+    the core's TIME reaches it), so an epoch stays valid for ``grace_s`` past its end. When two
+    epochs both fit (the clock was set back), the later one wins.
+    """
+
+    def __init__(self, jump_s: float = 2.0, grace_s: float = 6.0, keep_s: float = 36 * 3600.0,
+                 history: list | None = None) -> None:
+        self.jump_s, self.grace_s, self.keep_s = jump_s, grace_s, keep_s
+        self.epochs: list[Epoch] = []
+        for item in history or []:
+            try:
+                self.epochs.append(Epoch(float(item[0]), float(item[1]), float(item[2])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        self._base: float | None = None      # track time = monotonic + base, for this run
+        self.jumps = 0
+
+    def track_time(self, mono: float) -> float:
+        if self._base is None:
+            raise RuntimeError("note() has not been called yet")
+        return mono + self._base
+
+    def note(self, mono: float, wall: float) -> bool:
+        """True if the wall clock just jumped (the caller then sends every node the time again)."""
+        if self._base is None:
+            self._base = wall - mono         # this run's track time starts on the wall clock
+            start = wall
+            if self.epochs and self.epochs[-1].end > start:
+                # the clock was set back while the game was off: keep this run's times above the
+                # saved track's, so the two can never be mixed up
+                self._base += self.epochs[-1].end - start + 1.0
+                start = self.epochs[-1].end + 1.0
+            self.epochs.append(Epoch(start, start, wall - start))
+            return False
+        now = mono + self._base
+        current = self.epochs[-1]
+        delta = wall - now
+        current.end = now
+        if abs(delta - current.delta) <= self.jump_s:
+            return False
+        self.epochs.append(Epoch(now, now, delta))
+        self.jumps += 1
+        cutoff = now - self.keep_s
+        self.epochs = [e for e in self.epochs if e.end >= cutoff]
+        return True
+
+    def to_track(self, wall_time: float) -> float | None:
+        for epoch in reversed(self.epochs):
+            when = wall_time - epoch.delta
+            if epoch.start - 1.0 <= when <= epoch.end + self.grace_s:
+                return when
+        return None
+
+    def snapshot(self) -> list:
+        return [[round(e.start, 3), round(e.end, 3), round(e.delta, 3)] for e in self.epochs]

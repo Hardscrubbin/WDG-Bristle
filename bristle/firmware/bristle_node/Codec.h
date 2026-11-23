@@ -38,8 +38,17 @@ struct Msg {
 };
 
 // Parses a full line (no trailing newline). Returns false on bad CRC / malformed / too long.
-bool parseLine(const char* line, size_t len, Msg& out);
+// maxBytes: the longest line taken (0 = bp::LINE_MAX_BYTES; a bridge takes the longer relay lines).
+bool parseLine(const char* line, size_t len, Msg& out, size_t maxBytes = 0);
 // Parses a body (no CRC), e.g. inside a signed ESP-NOW frame.
 bool parseBody(const char* body, size_t len, Msg& out);
+
+// A full line -> its body (what travels inside a signed ESP-NOW frame), and back.
+String stripCrc(const String& line);
+String withCrc(const String& body);
+
+// base64url without padding (frames inside relay lines, firmware chunks).
+String b64urlEncode(const uint8_t* data, size_t len);
+bool b64urlDecode(const String& text, uint8_t* out, size_t cap, size_t& len);
 
 }  // namespace codec

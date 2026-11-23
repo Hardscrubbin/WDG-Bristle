@@ -286,8 +286,9 @@ class HardwareCheck(PluginBase):
         if bristle is not None:
             totals = bristle.service.fleet.totals()
             waiting = len(bristle.service.new_ports)
-            snap["esp32"].append((clip("Bristle nodes: %d online of %d%s" % (
-                totals["online"], totals["known"], ", %d new port(s) waiting" % waiting if waiting else "")),
+            snap["esp32"].append((clip("Bristle nodes: %d online of %d%s%s" % (
+                totals["online"], totals["known"], ", bridge on" if totals.get("bridges") else "",
+                ", %d new port(s) waiting" % waiting if waiting else "")),
                 C_OK if totals["online"] else C_DIM))
         kismet = self._kismet()
         snap["wifi"] = self._wifi_rows(wifi, usb, kismet)

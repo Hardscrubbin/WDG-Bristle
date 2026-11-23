@@ -82,7 +82,7 @@ class HTTPFixture:
         self.raw = json.dumps(manifest_v2(self.image) if manifest is None else manifest,
                               sort_keys=True).encode() if raw is None else raw
         data = json.loads(self.raw)
-        self.repo = {'id': 1442123109, 'full_name': c5.REPOSITORY}
+        self.repo = {'id': c5.REPOSITORY_ID, 'full_name': c5.REPOSITORY}   # [bristle] the build's own constant
         self.release = {'id': 123456, 'tag_name': 'v0.9.20', 'draft': False,
                         'prerelease': False, 'url': c5.API_PREFIX + '/releases/123456',
                         'html_url': 'https://github.com/' + c5.REPOSITORY + '/releases/tag/v0.9.20'}
@@ -142,7 +142,7 @@ class C5FirmwareMetadataTests(unittest.TestCase):
         self.assertTrue(all(options['timeout'] == 10 for _, options in fixture.calls))
 
     def test_wrong_repository_identity_stops_before_reading_any_release(self):
-        for value in (1, '1442123109', True, None):
+        for value in (1, str(c5.REPOSITORY_ID), True, None):   # [bristle]
             with self.subTest(value=value):
                 fixture = HTTPFixture()
                 fixture.repo['id'] = value

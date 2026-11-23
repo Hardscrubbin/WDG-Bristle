@@ -193,3 +193,40 @@ def split(nodes: list[NodeCaps], region: str = "U", dwell_ms: int | None = None,
         if p is not None and p.flags & proto.PLAN_FLAG_WIFI and not p.entries:
             p.entries = entries(ch24)
     return result
+
+
+def kismet_heavy_channels(sources: list, share: float = 1 / 6) -> tuple[set[int], str]:
+    """Channels Kismet's Wi-Fi adapters spend a large part of their time on.
+
+    ``sources``: one dict per Kismet datasource with kind ("wifi"), running (bool) and hop_channels
+    (or channels) as Kismet names them ("6", "36HT40+", ...). An adapter hopping n channels gives
+    each of them 1/n of its time; a channel whose share over all adapters reaches ``share`` counts as
+    heavily covered. Returns (channels, a sentence saying what was found).
+    """
+    time_on: dict[int, float] = {}
+    adapters = 0
+    for source in sources or []:
+        if source.get("kind") != "wifi" or not source.get("running", True):
+            continue
+        names = source.get("hop_channels") or source.get("channels") or []
+        numbers = set()
+        for name in names:
+            digits = ""
+            for ch in str(name).strip():
+                if not ch.isdigit():
+                    break
+                digits += ch
+            if digits and "W6" not in str(name).upper():
+                numbers.add(int(digits))
+        if not numbers:
+            continue
+        adapters += 1
+        for number in numbers:
+            time_on[number] = time_on.get(number, 0.0) + 1.0 / len(numbers)
+    if not adapters:
+        return set(), "Kismet is not capturing Wi-Fi: nodes split the channels evenly"
+    heavy = {ch for ch, part in time_on.items() if part >= share}
+    if not heavy:
+        return set(), "Kismet hops %d channels evenly: nodes split the channels evenly" % len(time_on)
+    return heavy, "Kismet stays mostly on %s: nodes give those channels the shortest dwell" % (
+        ", ".join(str(ch) for ch in sorted(heavy)))

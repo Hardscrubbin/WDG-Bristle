@@ -1,3 +1,27 @@
+# WDG-Bristle 1.1 (base 0.9.21.3)
+
+Built and unit-tested on a PC. Nothing in this entry has run on the uConsole or on a board yet;
+the bench list is `bristle/docs/BENCH_TESTS.md`.
+
+- Bristle Nodes: two more links next to USB. ESP-NOW through one board in the bridge role (signed
+  frames with a counter that survives restarts), and Bluetooth LE on the adapter kept for Bristle.
+- Firmware for the nodes from the game: write it to a board on USB, or update a linked node over
+  the air. An update that is cut off, or an image that does not come up, leaves the old firmware.
+- A new Bristle board is recognised by listening to it. Nothing is written to a serial port to
+  find out what is on it, and the game's own ESP32 search never takes an unadopted Bristle board.
+- Nearby alerts (PLUGINS > Bristle: Alerts): signatures with a published source for every value,
+  devices that keep turning up at places far apart, other Bristle rigs, and Kismet's own alerts.
+- Possible skimmers (PLUGINS > Skimmer suspects): listening only. Scored sightings, an estimated
+  position, hunt mode, a report to hand over. Kept in `loot/skimmers/`, never uploaded.
+- A second core: the owner key and Node Memory exported to a file locked with a passphrase. A
+  fleet one core is running is left alone by another.
+- The GPS track is kept on disk and on a clock that does not jump, so a restart of the game or a
+  correction of the uConsole's clock mid-drive no longer loses finds.
+- While nodes scan the game counts as wardriving; a nodes-only drive is queued for WiGLE through
+  the Kismet plugin's public function; the repeat times in `bristle.conf` are sent to the nodes;
+  channels Kismet stays on get the nodes' shortest dwell.
+- Node firmware `v1-build4-dev`. Earlier builds are superseded.
+
 # 0.9.21.3 — code-relative recovery helper, checked before device hand-off
 
 - Fix the recovery program path: locate esp32_flash.py beside the running app.py, independently of the configured data/loot directory and CWD. Do not move data or copy scripts into loot.

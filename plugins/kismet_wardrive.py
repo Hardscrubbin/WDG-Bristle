@@ -316,6 +316,18 @@ except (TypeError, ValueError):
 # "off" leaves both hopping everything. WDG_KISMET_SPLIT in secrets.conf.
 from plugins import _kismet_extras as kx
 from plugins import _gpsd_proxy
+
+try:  # [bristle] Bristle reads along from each poll (nearby alerts, skimmer suspects). Nothing changes here without it.
+    from plugins._bristle import kismet_tap as _bristle_tap
+except Exception:
+    class _bristle_tap:  # noqa: N801
+        @staticmethod
+        def bt_device(*_args):
+            pass
+
+        @staticmethod
+        def poll(*_args):
+            pass
 KISMET_SPLIT_MODE = (_secret("WDG_KISMET_SPLIT", default="band") or "band").strip().lower()
 if KISMET_SPLIT_MODE not in ("band", "off"):
     KISMET_SPLIT_MODE = "band"
@@ -906,6 +918,7 @@ class KismetBridgeEngine:
                 self.seen_bt_macs.add(mac)
                 rssi = int(sig) if isinstance(sig, (int, float)) else -100
                 bt_devices.append((mac, rssi, name or mac))
+                _bristle_tap.bt_device(d, mac, name, rssi)   # [bristle] nearby alerts and skimmer suspects read along
 
         # [v2] publish by rebinding (atomic in CPython), never in-place.
         if new_handshakes - self.handshake_macs:
@@ -2344,6 +2357,11 @@ class KismetWardriveBridge(PluginBase):
                 except OSError:
                     pass
 
+    def queue_wigle_upload(self, csv_path):
+        """[bristle] Public name for other plugins: put one wardriving.csv into the WiGLE upload
+        queue (the same queue a Kismet drive's file goes into). Safe from any thread."""
+        self._queue_wigle_upload(csv_path)
+
     def _queue_wigle_upload(self, csv_path):
         with self._wigle_lock:
             q = self._load_wigle_queue()
@@ -2745,6 +2763,7 @@ class KismetWardriveBridge(PluginBase):
                 self._source_check(err)
             except Exception:
                 pass  # a watch that fails must never stop the polling itself
+            _bristle_tap.poll(self.engine, KISMET_URL)   # [bristle] Kismet's alerts and source list, on this thread
             # [v2.6] wake immediately on stop instead of sleeping in 0.1s
             # slices (the join in _stop_poll_thread no longer waits ~100ms).
             if stop_evt.wait(self.POLL_INTERVAL):

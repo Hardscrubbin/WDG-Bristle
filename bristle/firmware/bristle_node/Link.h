@@ -1,4 +1,4 @@
-// One connection to the core. USB today; the ESP-NOW and Bluetooth LE links (later steps) are the same
+// One connection to the core: USB, ESP-NOW through the bridge, or Bluetooth LE. They are the same
 // thing to the rest of the firmware: something that carries protocol lines and has its own handshake.
 #pragma once
 #include <Arduino.h>
@@ -18,6 +18,7 @@ class Link {
   // Handshake state for this link (Owner.cpp) and its timers (Node.cpp).
   bool helloSeen = false;       // the core said HI on this link
   bool authed = false;          // the core proved it holds the owner key
+  String coreId;                // the core that said HI here (8 hex, "" if it gave none): one core at a time
   uint8_t coreNonce[16] = {0};
   uint8_t nodeNonce[16] = {0};
   uint32_t lastRxMs = 0;        // last valid line from the core

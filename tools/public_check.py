@@ -28,6 +28,11 @@ The word list is not part of this tool. It is a plain text file, one entry per l
 One file is the allowed place for names that devices and earlier installs still use
 (ALLOWED_FILES below). Its wording is not checked. Everything else about it is.
 
+Four of LOCOSP's own icons carry metadata that names the tool they were made with. They are his
+originals and are published unchanged, so the wording inside exactly those four files is not
+checked (EXCUSED_BINARIES below: path and SHA-256). A file at one of those paths with any other
+content is checked like every other file.
+
 Folders called "licenses" hold other projects' licence texts, word for word; the addresses in
 them are theirs and are not checked against the owner list. ONE line of THIRD_PARTY_NOTICES.md
 may link to an owner that is not on the list (the credits line).
@@ -37,8 +42,17 @@ import re
 import sys
 from urllib.parse import unquote
 
+import hashlib
+
 CREDITS_FILE = "THIRD_PARTY_NOTICES.md"
 ALLOWED_FILES = ("watchdogs/legacy_names.py",)
+# LOCOSP's original icons, byte for byte as in LOCOSP/WatchDogsGo. Only these exact files.
+EXCUSED_BINARIES = {
+    "assets/addons.png": "f4f68cf88747b45e4852270c9797900821caf63db27917d3ea4d4e845a528d4e",
+    "assets/attack.png": "ec148faefa837294044f9e5181ef419362a81c55bd00588fbed0c18d4eded1c5",
+    "assets/scan.png": "e1d0b36364ab15393d750e07c2dd57dc63526fdcfe861f736363f5f1e5b05d40",
+    "assets/sniff.png": "f592065ac671e334b7f7e7922e4fba73b1f0ca5980b0544ef1f20fedd3ad029f",
+}
 _EDGE = r"(?<![A-Za-z0-9])(?:%s)(?![A-Za-z0-9])"
 PRIVATE_KEY_RE = re.compile(r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----")
 NAMED_VALUE_RE = re.compile(
@@ -57,6 +71,7 @@ ALLOWED_OWNERS = (
     "kismetwireless", "flightaware", "meshtastic", "meshcore-dev", "hackergadgets",   # tools the game drives
     "fcambus", "nvkelso",                                       # the Spleen font, Natural Earth
     "justcallmekoko", "dark3d", "FusedStamen",                  # credited authors and contributors
+    "evilsocket",                                               # pwngrid: cited as the source of a signature value
 )
 NOT_OWNERS = {"user-attachments", "orgs", "features", "about", "login", "settings", "sponsors", "marketplace",
               "topics", "search", "apps"}                       # parts of github.com that are not accounts
@@ -205,6 +220,8 @@ def check_binary(rel: str, data: bytes, words=None) -> list:
     """The readable strings of a binary file: folders of the machine it was made on, and (with a
     word list) the words. At most BINARY_SHOWN findings are spelled out per file."""
     found = []
+    if words and EXCUSED_BINARIES.get(rel) == hashlib.sha256(data).hexdigest():
+        words = None                     # one of LOCOSP's four original icons, unchanged
     runs = [(m.start(), m.group().decode("ascii")) for m in RUN_RE.finditer(data)]
     runs += [(m.start(), m.group().decode("utf-16-le")) for m in WIDE_RUN_RE.finditer(data)]
     for offset, run in sorted(runs):

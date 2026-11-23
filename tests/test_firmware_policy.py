@@ -171,7 +171,7 @@ class FirmwarePolicyTests(unittest.TestCase):
         self.assert_board_untouched(env,threads=1)
 
     def test_game_updater_and_separate_piglet_keep_existing_identity(self):
-        self.assertEqual(game_updates.REPOSITORY_ID,1442123109);self.assertEqual(game_updates.CHANNEL,'stable')
+        self.assertEqual(game_updates.REPOSITORY_ID,0);self.assertEqual(game_updates.OWNER_ID,0);self.assertEqual(game_updates.CHANNEL,'stable')
         if not (ROOT/'firmware/piglet-collection/manifest.json').is_file():
             self.skipTest('No bundled firmware in this build')  # [bristle]
         piglet=json.loads((ROOT/'firmware/piglet-collection/manifest.json').read_text())

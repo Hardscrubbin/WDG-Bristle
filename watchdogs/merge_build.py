@@ -37,7 +37,7 @@ NOTICE_TIMEOUT = 4.0
 
 BUILD_TAG = "bristle"
 BUILD_NAME = "WDG-Bristle"
-BUILD_VERSION = "1.0"
+BUILD_VERSION = "1.1"   # [bristle] 1.1: three node links, updates over the air, nearby alerts, skimmer suspects
 
 # One line each, <= 83 characters: the Update Game window shows one log line.
 INSTALL_BLOCKED = "Blocked: WDG-Bristle is updated by hand, never from an online release."
@@ -49,7 +49,7 @@ _MARKER = Path("watchdogs") / "merge_build.py"
 
 
 def display_version(version) -> str:
-    """'0.9.21.3' -> 'WDG-Bristle 1.0 (base 0.9.21.3)' (display only; never parsed)."""
+    """'0.9.21.3' -> 'WDG-Bristle 1.1 (base 0.9.21.3)' (display only; never parsed)."""
     return f"{BUILD_NAME} {BUILD_VERSION} (base {version})"
 
 

@@ -3,17 +3,19 @@
 Every grey block can be copied and pasted whole into a terminal on the uConsole.
 Run everything as your normal user. The installer asks for `sudo` itself.
 
-**What this is.** WDG-Bristle 1.0: Watch Dogs Go (base 0.9.21.3) with the Kismet wardriving bridge,
+**What this is.** WDG-Bristle 1.1: Watch Dogs Go (base 0.9.21.3) with the Kismet wardriving bridge,
 dual-GPS through gpsd with a health screen, a Hardware Check screen, Kismet on two Wi-Fi adapters,
 ADS-B tracks + KML, 433 capture to Flipper `.sub`, 433 Hunter, loot backup/restore, session log,
 WDGWars pairing + status, an offline-basemap layer, and **Bristle Nodes**: a fleet of ESP32-C5
-scanning boards with this uConsole as the core (section 9).
+scanning boards with this uConsole as the core, over USB, an ESP-NOW bridge or Bluetooth, with
+firmware updates, nearby alerts and a list of possible skimmers (section 9).
 
 **What has been proven, and what has not.** The build this one is made from passed its self-test
-and its installer on the uConsole. WDG-Bristle itself (the rename and the Bristle Nodes plugin) has
-only been built and unit-tested on a Windows PC: nothing in it has run on the uConsole yet, and the
-node firmware has not run on a board yet. The PC cannot run the shell scripts at all (it has no
-bash). The simulation scenarios were not run for this build; use `./selftest.sh --tests-only`.
+and its installer on the uConsole. WDG-Bristle itself (the rename, the Bristle Nodes plugin and
+everything new in 1.1) has only been built and unit-tested on a Windows PC: nothing in it has run
+on the uConsole yet, and the node firmware has not run on a board yet. The PC cannot run the shell
+scripts at all (it has no bash). The simulation scenarios were not run for this build; use
+`./selftest.sh --tests-only`. The bench list that proves it is `bristle/docs/BENCH_TESTS.md`.
 
 **Coming from the earlier install?** Unzip this next to it and run `./install.sh`.
 The installer copies your loot, maps, `secrets.conf`, `whitelist.json`, firmware cache, Kismet adapter
@@ -205,25 +207,37 @@ Do these in order. Each one says what you should see.
 
 ## 9. Bristle Nodes (ESP32-C5 scanning boards)
 
-Flash the boards first, from the PC: `Bristle/docs/FLASHING.md` in the Bristle folder. Plug them
-into a **powered** USB hub on the uConsole (never power them from the AIO board).
+Everything for the nodes is in the `bristle/` folder inside this install: the firmware images
+(`bristle/firmware/releases/`) and the guides (`bristle/docs/`). Plug the boards into a **powered**
+USB hub on the uConsole (never power them from the AIO board).
 
 1. Start the game. The first time, it adds one line to `secrets.conf`: `BRISTLE_OWNER_KEY=...`.
    That key is what your nodes answer to. It is never shown. It is inside every loot backup.
-2. **PLUGINS > Bristle: Nodes.** A board the game has not met shows as `NEW PORT`. Nothing is sent
-   to a new port until you press **A** on it. Press **X** on a port that is not a node (another
-   ESP32, for example): it is never spoken to again.
+2. **PLUGINS > Bristle: Nodes.** A board running Bristle firmware announces itself and shows as
+   `NEW`. Any other ESP32 board shows as `NEW PORT` and nothing is sent to it: press **W** to write
+   Bristle firmware to a blank board, or **X** if it is not a node (your JanOS board): it is never
+   spoken to again.
 3. Press **A** on the `NEW` row to adopt the board. It gets a number and keeps it for good.
 4. Press **S** to start scanning, **S** again to stop. With `tie_to_kismet = on` the nodes start
    and stop with a Kismet wardrive. Finds go into the same `wardriving.csv`, XP and map as
    everything else, placed where the uConsole was when the node saw them.
 5. **F8** on the map switches the small Bristle line (bottom left) on and off.
 
-Settings: copy `bristle.conf.example` to `bristle.conf` and edit it. Node Memory and the Block list
-are in `loot/bristle/`, so the installer keeps them and loot backups include them.
+More nodes than the hub has ports, or nodes around the car: make one board the bridge (**G** on the
+Nodes screen) and power the others from anything. Nodes out of the bridge's reach link over
+Bluetooth by themselves. **U** updates a node's firmware over whatever link it is on.
 
-Bench steps, the protocol and the plan: `docs/BENCH_TESTS.md`, `docs/PROTOCOL.md` and
-`docs/PLAN.md` in the Bristle folder. What is unproven or undecided: `docs/BACKTRACK.md` there.
+Two more screens: **PLUGINS > Bristle: Alerts** (what the radios noticed, and the on/off switch
+for each kind) and **PLUGINS > Skimmer suspects** (possible card skimmers: listening only; press
+**?** there for what it can and cannot find).
+
+Settings: copy `bristle.conf.example` to `bristle.conf` and edit it. Node Memory, the Block list
+and the GPS track are in `loot/bristle/`, suspects in `loot/skimmers/`, so the installer keeps them
+and loot backups include them. `bristle.conf` is kept by the installer too.
+
+The guides, in `bristle/docs/`: `INSTALL.md` (every screen and key), `HARDWARE.md` (hubs, power,
+the bridge), `FLASHING.md`, `BOARDS.md`, `PROTOCOL.md`, `SIGNATURES.md`, and `BENCH_TESTS.md`, the
+one list of bench steps (checkpoints A to H) with what to plug in and what to expect.
 
 ## Troubleshooting
 

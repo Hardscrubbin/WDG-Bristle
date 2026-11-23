@@ -17,7 +17,13 @@
   #define BRISTLE_LED_ACTIVE_LOW 1    // VERIFY at checkpoint A (console: `ident 5`)
   #define BRISTLE_LED_RGB 0
 #else
-  #define BRISTLE_BOARD "devkit_c5"
+  // The name is also the firmware folder an update is taken from, so the build for boards whose
+  // only USB port is a CH343/UART chip has its own.
+  #if ARDUINO_USB_CDC_ON_BOOT
+    #define BRISTLE_BOARD "devkit_c5"
+  #else
+    #define BRISTLE_BOARD "devkit_c5_uart"
+  #endif
   #define BRISTLE_LED_PIN RGB_BUILTIN // DevKit-style boards: addressable RGB LED on GPIO27
   #define BRISTLE_LED_ACTIVE_LOW 0
   #define BRISTLE_LED_RGB 1
@@ -29,4 +35,4 @@
 #endif
 
 // Firmware build number: bump on every release (reported in HELLO and HB as b=).
-#define BRISTLE_BUILD 3
+#define BRISTLE_BUILD 4

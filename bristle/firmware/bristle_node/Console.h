@@ -8,6 +8,6 @@ namespace console {
 void say(const String& text);
 void banner();                    // one line at boot
 void run(const String& command);  // a line someone typed
-bool selftest();                  // the spec's test vectors; prints PASS/FAIL per vector
+bool selftest(bool quiet = false);   // the spec's test vectors; prints PASS/FAIL per vector unless quiet
 
 }  // namespace console

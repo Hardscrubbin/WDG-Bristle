@@ -12,10 +12,13 @@ States:
   FORGOTTEN   owned by OUR key but not in Node Memory. Offered for re-adoption; never automatic.
   BLOCKED     on the Block list. Ignored completely.
   AUTHED      ours, in Node Memory, handshake complete. Commands and finds flow.
+  BUSY        ours, but another core is running it over a wireless link. Nothing is sent to it
+              except a new hello every now and then: two cores never fight over a node.
   CLOSED      link gone.
 """
 from __future__ import annotations
 
+import base64
 import time
 from dataclasses import dataclass, field
 from typing import Callable
@@ -25,8 +28,26 @@ from .delivery import DeliveryTracker
 from .plan import Plan
 from .registry import Registry
 
-HELLO_WAIT, NO_ANSWER, NEW, NOT_OURS, FORGOTTEN, BLOCKED, AUTHED, CLOSED = (
-    "HELLO_WAIT", "NO_ANSWER", "NEW", "NOT_OURS", "FORGOTTEN", "BLOCKED", "AUTHED", "CLOSED")
+HELLO_WAIT, NO_ANSWER, NEW, NOT_OURS, FORGOTTEN, BLOCKED, AUTHED, BUSY, CLOSED = (
+    "HELLO_WAIT", "NO_ANSWER", "NEW", "NOT_OURS", "FORGOTTEN", "BLOCKED", "AUTHED", "BUSY", "CLOSED")
+
+# How patient a link is: (seconds to wait for HELLO, tries, seconds of silence before a new hello,
+# least seconds between two ACKs). A node on ESP-NOW only talks when it visits the control channel.
+LINK_TIMING = {
+    proto.LINK_USB: (proto.USB_HELLO_WAIT_MS / 1000, proto.USB_HELLO_TRIES, 3 * proto.HEARTBEAT_MS / 1000,
+                     proto.ACK_MIN_INTERVAL_MS / 1000),
+    proto.LINK_ESPNOW: (4 * proto.ESPNOW_VISIT_INTERVAL_MS / 1000, 4, proto.LINK_TIMEOUT_MS / 1000,
+                        proto.ESPNOW_VISIT_INTERVAL_MS / 1000),
+    proto.LINK_BLE: (3.0, 3, 5 * proto.HEARTBEAT_MS / 1000, proto.ACK_MIN_INTERVAL_MS / 1000),
+}
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def b64url_decode(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
 @dataclass
@@ -71,6 +92,7 @@ class Desired:
     session: int = 0
     repeat_ap_ms: int = proto.REPEAT_AP_MS
     repeat_ble_ms: int = proto.REPEAT_BLE_MS
+    control_channel: int | None = None       # ESP-NOW control channel (None: leave the node's as it is)
 
 
 @dataclass
@@ -84,8 +106,10 @@ class NodeSession:
     on_event: Callable[[str, "NodeSession", dict], None] = lambda kind, s, info: None
     clock: Callable[[], float] = time.time
     mono: Callable[[], float] = time.monotonic
+    core_id: str = ""         # this core (8 hex): a node run by another core answers "busy"
 
     state: str = CLOSED
+    role: int = proto.ROLE_NODE
     hwid: str = ""
     board: str = ""
     build: int = 0
@@ -102,11 +126,24 @@ class NodeSession:
     _last_tx: float = 0.0
     _last_time_sent: float = 0.0
     _last_fix: dict[str, float] = field(default_factory=dict)
+    _repeat_sent: tuple | None = None        # the REPEAT values the node confirmed
+    _channel_sent: int | None = None
+    _busy_at: float = 0.0
+    _busy_told: bool = False
+
+    def __post_init__(self) -> None:
+        self.hello_wait_s, self.hello_tries, self.silence_s, self.ack_interval_s = LINK_TIMING.get(
+            self.link_type, LINK_TIMING[proto.LINK_USB])
+
+    @property
+    def is_bridge(self) -> bool:
+        return self.role == proto.ROLE_BRIDGE
 
     # ------------------------------------------------------------------ outgoing
     def _cmd(self, msg_type: str, fields: dict | None = None) -> None:
         self._last_tx = self.mono()
-        self.send(codec.build(msg_type, fields))
+        limit = proto.LINE_RELAY_MAX_BYTES if msg_type == "ETX" else None
+        self.send(codec.build(msg_type, fields, limit))
 
     def start(self) -> None:
         """Begin (or restart) the handshake."""
@@ -118,7 +155,7 @@ class NodeSession:
         self.state = HELLO_WAIT
         self._hello_at = self.mono()
         self._hello_tries += 1
-        self._cmd("HI", {"v": proto.PROTOCOL_VERSION, "cn": self._core_nonce.hex()})
+        self._cmd("HI", {"v": proto.PROTOCOL_VERSION, "cn": self._core_nonce.hex(), "ci": self.core_id or None})
 
     def adopt(self, number: int | None = None) -> int:
         """Adopt this NEW (or FORGOTTEN) node. Only over USB. Returns the node number."""
@@ -151,7 +188,7 @@ class NodeSession:
             self.on_event("console", self, {"text": text[1:].strip()})
             return
         try:
-            msg = codec.parse(raw)
+            msg = codec.parse(raw, proto.LINE_RELAY_MAX_BYTES)
             codec.check_required(msg)
         except codec.LineError:
             self.dropped_lines += 1
@@ -165,8 +202,8 @@ class NodeSession:
         t = msg.type
         if t == "HELLO":
             self._on_hello(msg)
-        elif self.state in (NOT_OURS,):
-            return
+        elif t == "BCN" or self.state in (NOT_OURS,):
+            return                                    # BCN: the board's own "I am here", before our HI
         elif t == "RSP":
             self._on_rsp(msg)
         elif t == "TREQ":
@@ -179,6 +216,12 @@ class NodeSession:
             self._on_find(msg)
         elif t == "OTAS":
             self.on_event("ota", self, dict(msg.fields))
+        elif t == "SEEN":
+            self.on_event("seen", self, dict(msg.fields))
+        elif t == "ERX" and self.is_bridge:
+            self.on_event("erx", self, dict(msg.fields))
+        elif t == "BST" and self.is_bridge:
+            self.on_event("bst", self, dict(msg.fields))
 
     def _on_hello(self, msg: codec.Message) -> None:
         try:
@@ -192,6 +235,7 @@ class NodeSession:
         self.board = msg.get("bd", "")
         self.build = msg.int("b", 0) or 0
         self.caps = msg.int("cap", 0) or 0
+        self.role = msg.int("ro", proto.ROLE_NODE) or proto.ROLE_NODE
         if self.registry.is_blocked(self.hwid):
             self.state = BLOCKED
             self.on_event("blocked_seen", self, {})
@@ -221,8 +265,10 @@ class NodeSession:
         self.state = AUTHED
         self.number = rec.number
         self._last_hb = self.mono()      # the silence timer starts now, not at the first heartbeat
+        self._repeat_sent = self._channel_sent = None     # a node that restarted is told again
+        self._busy_told = False
         facts = dict(board=self.board, build=self.build, cap_5g=bool(self.caps & proto.HB_CAP_5G),
-                     cap_ble=bool(self.caps & proto.HB_CAP_BLE))
+                     cap_ble=bool(self.caps & proto.HB_CAP_BLE), role=self.role)
         if self.usb_key and rec.usb_key != self.usb_key:
             facts["usb_key"] = self.usb_key
             self.registry.touch(self.hwid, **facts)
@@ -234,6 +280,18 @@ class NodeSession:
 
     def _on_rsp(self, msg: codec.Message) -> None:
         c, ok = msg.get("c"), msg.get("ok") == "1"
+        if c == "HI" and not ok and msg.get("e") == proto.ERRORS["BUSY"]:
+            # Another core is running this node. Leave it alone and ask again later.
+            if not self._busy_told:
+                self._busy_told = True
+                self.on_event("busy", self, {})
+            self.state = BUSY
+            self._busy_at = self.mono()
+            return
+        if c == "REPEAT" and ok:
+            self._repeat_sent = (self.desired.repeat_ap_ms, self.desired.repeat_ble_ms)
+        elif c == "ESPN" and ok:
+            self._channel_sent = self.desired.control_channel
         if c == "ADOPT" and ok:
             self.start()                              # node now holds the key: authenticate
         elif not ok and self.state == AUTHED and msg.get("e") == proto.ERRORS["NOT_AUTHED"]:
@@ -248,7 +306,11 @@ class NodeSession:
         h.flags, h.plan_hash, h.run_mask = g("f", 0), msg.get("ph", ""), g("m", 0)
         h.session, h.link, h.backlog, h.dropped = g("s", 0), g("lk", 0), g("qb", 0), g("qd", 0)
         h.capacity, h.fill_pct, h.next_seq, h.oldest_seq = g("qc", 0), g("qf", 0), g("qn", 0), g("qo", 0)
-        h.build, h.temp_c, h.uptime_s, h.ram_kb, h.rssi = g("b", 0), g("t"), g("up"), g("ram"), g("rs")
+        h.build, h.temp_c, h.uptime_s, h.ram_kb = g("b", 0), g("t"), g("up"), g("ram")
+        if g("rs") is not None:
+            h.rssi = g("rs")
+        if h.flags & proto.HB_BRIDGE:
+            self.role = proto.ROLE_BRIDGE
         h.at = self.mono()
         self._last_hb = h.at
         self.delivery.node(self.hwid).node_oldest(h.oldest_seq)
@@ -288,8 +350,16 @@ class NodeSession:
             self.number = d.number
         if d.plan is not None and h.plan_hash != d.plan.hash() and self._rate_ok("plan"):
             self._cmd("PLAN", d.plan.fields())
+        if self.is_bridge:
+            if d.control_channel is not None and self._channel_sent != d.control_channel and self._rate_ok("espn", 5.0):
+                self._cmd("ESPN", {"ch": d.control_channel})
+            return                                    # a bridge has no plan and never scans
         if (h.run_mask != d.run_mask or (d.run_mask and h.session != d.session)) and self._rate_ok("run"):
             self._cmd("RUN", {"m": d.run_mask, "s": d.session})
+        if self._repeat_sent != (d.repeat_ap_ms, d.repeat_ble_ms) and self._rate_ok("repeat", 5.0):
+            self._cmd("REPEAT", {"ap": d.repeat_ap_ms, "ble": d.repeat_ble_ms})
+        if d.control_channel is not None and self._channel_sent != d.control_channel and self._rate_ok("espn", 5.0):
+            self._cmd("ESPN", {"ch": d.control_channel})
 
     def sync(self) -> None:
         """Push the desired state to the node now instead of waiting for its next heartbeat."""
@@ -299,8 +369,12 @@ class NodeSession:
     def tick(self) -> None:
         """Call often (e.g. every 100 ms): sends acks, keeps the link alive, enforces timeouts."""
         now = self.mono()
-        if self.state == HELLO_WAIT and now - self._hello_at > proto.USB_HELLO_WAIT_MS / 1000:
-            if self._hello_tries < proto.USB_HELLO_TRIES:
+        if self.state == BUSY:
+            if now - self._busy_at > proto.BUSY_RETRY_MS / 1000:
+                self.start()                          # still busy: the node says so again
+            return
+        if self.state == HELLO_WAIT and now - self._hello_at > self.hello_wait_s:
+            if self._hello_tries < self.hello_tries:
                 self._say_hi()
             else:
                 # Not a Bristle node. Say nothing more to it.
@@ -309,10 +383,10 @@ class NodeSession:
             return
         if self.state != AUTHED:
             return
-        ack = self.delivery.node(self.hwid).ack_due(proto.ACK_MIN_INTERVAL_MS / 1000, now)
+        ack = None if self.is_bridge else self.delivery.node(self.hwid).ack_due(self.ack_interval_s, now)
         if ack is not None:
             self._cmd("ACK", {"q": ack})
-        if now - self._last_hb > 3 * proto.HEARTBEAT_MS / 1000:
+        if now - self._last_hb > self.silence_s:
             # No heartbeat for three periods: the node restarted, or the cable is half out.
             self.on_event("silent", self, {"seconds": round(now - self._last_hb)})
             self.start()
@@ -325,6 +399,23 @@ class NodeSession:
     # ------------------------------------------------------------------ direct commands
     def identify(self, seconds: int = 10) -> None:
         self._cmd("IDENT", {"d": seconds})
+
+    def set_role(self, role: int) -> None:
+        """Make this board the bridge (or a node again). USB only; the board restarts."""
+        if self.link_type != proto.LINK_USB:
+            raise PermissionError("the role is set over USB only")
+        self._cmd("ROLE", {"r": role})
+
+    def relay(self, mac: str, frame: bytes) -> None:
+        """Bridge only: hand it an ESP-NOW frame for the node with this MAC."""
+        self._cmd("ETX", {"to": mac, "d": b64url(frame)})
+
+    def watch(self, mac: str, seconds: int) -> None:
+        """Hunt mode: report every advertisement from this MAC (listening only). 0 stops it."""
+        self._cmd("WATCH", {"m": mac.replace(":", "").lower(), "d": int(seconds)})
+
+    def ota(self, fields: dict) -> None:
+        self._cmd("OTA", fields)
 
     def forget_on_node(self) -> None:
         """Free the node (owner, number, plan, queue cleared on the node) and drop it from memory."""

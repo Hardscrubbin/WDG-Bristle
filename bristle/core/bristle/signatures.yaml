@@ -1,0 +1,156 @@
+# Bristle signatures: what the nearby alerts and the skimmer score look for.
+#
+# You may edit this file. The form is described at the top of nearby.py; in short, one entry per
+# signature, every test in an entry must match, and inside a [list] any one value is enough.
+# Write MAC prefixes and names in quotes.
+#
+# RULE: every value has a published source, written in the entry's "source" line. An entry with no
+# source is refused when the file is loaded. Values that could not be checked against a source
+# were left out; docs/SIGNATURES.md lists them, and says how each source was read.
+#
+# "weight" is used by the skimmer score only (nearby alerts ignore it).
+version: 1
+signatures:
+
+  # ------------------------------------------------------------------ Axon
+  - id: axon-oui
+    type: axon
+    label: "Axon device (body camera, Taser, dock)"
+    kind: any
+    mac_prefix: ["00:25:DF"]
+    source: "IEEE OUI registry (oui.csv, read 2026-11-22): MA-L 00-25-DF is assigned to Axon Enterprise, Inc."
+  - id: axon-service-uuid
+    type: axon
+    label: "Axon device (Bluetooth service 0xFC81)"
+    kind: bt
+    service_uuid16: [0xFC81]
+    source: "Bluetooth SIG assigned numbers, member UUIDs (read 2026-11-22): 0xFC81 is assigned to Axon Enterprise, Inc."
+  - id: axon-company-id
+    type: axon
+    label: "Axon device (TASER International company id)"
+    kind: bt
+    company_id: [0x034D]
+    source: "Bluetooth SIG assigned numbers, company identifiers (read 2026-11-22): 0x034D is TASER International, Inc., the name Axon Enterprise had until 2017."
+
+  # ------------------------------------------------------------------ Flock Safety
+  - id: flock-oui
+    type: flock
+    label: "Flock Safety device"
+    kind: any
+    mac_prefix: ["B4:1E:52"]
+    source: "IEEE OUI registry (oui.csv, read 2026-11-22): MA-L B4-1E-52 is assigned to Flock Safety."
+
+  # ------------------------------------------------------------------ trackers
+  - id: tracker-apple-findmy
+    type: tracker
+    label: "Apple Find My accessory away from its owner (AirTag type)"
+    kind: bt
+    company_id: [0x004C]
+    mfg_type: [0x12]
+    source: "Company id 0x004C: Bluetooth SIG company identifiers (Apple, Inc.). Type byte 0x12: Heinrich, Bittner, Hollick, 'AirGuard - Protecting Android Users From Stalking Attacks By Apple Find My Devices', arXiv 2202.11813, section 2.2.1 (BLE advertisement format): 'The first two bytes are set to the company ID of Apple, the next byte is fixed to 0x12, which identifies that this advertisement is used for Find My.'"
+  - id: tracker-tile-uuid
+    type: tracker
+    label: "Tile tracker"
+    kind: bt
+    service_uuid16: [0xFEED, 0xFEEC, 0xFD84]
+    source: "Bluetooth SIG assigned numbers, member UUIDs (read 2026-11-22): 0xFEED, 0xFEEC and 0xFD84 are assigned to Tile, Inc."
+  - id: tracker-tile-company
+    type: tracker
+    label: "Tile tracker"
+    kind: bt
+    company_id: [0x067C]
+    source: "Bluetooth SIG assigned numbers, company identifiers (read 2026-11-22): 0x067C is Tile, Inc."
+  - id: tracker-chipolo
+    type: tracker
+    label: "Chipolo tracker"
+    kind: bt
+    service_uuid16: [0xFE65, 0xFE33]
+    source: "Bluetooth SIG assigned numbers, member UUIDs (read 2026-11-22): 0xFE65 and 0xFE33 are assigned to CHIPOLO d.o.o."
+  - id: tracker-samsung-smarttag
+    type: tracker
+    label: "Samsung SmartTag type tracker"
+    kind: bt
+    service_uuid16: [0xFD5A]
+    source: "Bluetooth SIG assigned numbers, member UUIDs (read 2026-11-22): 0xFD5A is assigned to Samsung Electronics Co., Ltd. That SmartTags use it: Yu et al., 'Privacy Analysis of Samsung's Crowd-Sourced Bluetooth Location Tracking System', arXiv 2210.14702, section 4.5.1 (Helper-Tag Interaction): 'A registered tag broadcasts OF advertisements on UUID FD5A continuously.'"
+
+  # ------------------------------------------------------------------ wardriving and pentest devices
+  - id: pentest-piglet-setup
+    type: pentest
+    label: "Piglet wardriver (its setup access point)"
+    kind: wifi
+    name_exact: ["Piglet-WARDRIVE"]
+    source: "Piglet firmware source, Config.h: the default of wardriverSsid is 'Piglet-WARDRIVE'."
+
+  # ------------------------------------------------------------------ other Bristle rigs
+  - id: rig-bristle-advert
+    type: rig
+    label: "Bristle board"
+    kind: bt
+    bristle: true
+    source: "Bristle protocol (spec/bristle_proto.yaml, ble): a Bristle board advertises the Bristle service UUID with its hwid as service data."
+  - id: rig-bristle-name
+    type: rig
+    label: "Bristle board"
+    kind: bt
+    name_prefix: ["BRISTLE-"]
+    source: "Bristle protocol (spec/bristle_proto.yaml, product.prefix): boards are named BRISTLE-<n> or BRISTLE-NEW."
+
+  # ------------------------------------------------------------------ possible skimmers
+  # Bhaskar, Bland, Levchenko, Schulman: "Please Pay Inside: Evaluating Bluetooth-based Detection
+  # of Gas Pump Skimmers", USENIX Security 2019 (usenix.org/system/files/sec19-bhaskar.pdf).
+  - id: skimmer-name-hc
+    type: skimmer
+    label: "default module name HC-05/HC-06"
+    kind: bt
+    name_exact: ["HC-05", "HC-06"]
+    weight: 20
+    source: "Bhaskar et al. 2019, section 3, table of factory default scan profiles: HC module, device name 'HC-05/06'."
+  - id: skimmer-name-rnbt
+    type: skimmer
+    label: "default module name RNBT-xxxx"
+    kind: bt
+    name_prefix: ["RNBT-"]
+    weight: 20
+    source: "Bhaskar et al. 2019: Roving Networks module, default device name RNBT-xxxx (section 4.3; the table in section 3 prints it as 'RBNT-*')."
+  - id: skimmer-name-hc08
+    type: skimmer
+    label: "default module name HC-08"
+    kind: bt
+    name_exact: ["HC-08"]
+    weight: 20
+    source: "HC-08 Bluetooth UART Communication Module User Manual, software HC-08 V3.1, hardware V2.0, dated 2017-07-07 (www.hc01.com), AT command table, command 7: AT+NAME=xxxxxxxxxxxx, Revise name, default HC-08. Read as the copy at static.chipdip.ru/lib/781/DOC013781198.pdf."
+  - id: skimmer-name-jdy31
+    type: skimmer
+    label: "default module name JDY-31-SPP"
+    kind: bt
+    name_exact: ["JDY-31-SPP"]
+    weight: 20
+    source: "JDY-31 Bluetooth Module manual (it opens 'JDY-31 Bluetooth Module Introduction'), command 7, broadcast name settings/query, AT+NAME: 'Default broadcast name: JDY-31-SPP'. Read as the copy at alexgyver.ru/arduino/JDY-31.pdf."
+  - id: skimmer-class-uncategorized
+    type: skimmer
+    label: "device class Uncategorized"
+    kind: bt
+    cod_major: [31]
+    weight: 25
+    source: "Bhaskar et al. 2019, section 4: all 87 skimmers had Class of Device 'Uncategorized'. The number: Bluetooth SIG assigned numbers, class_of_device, major class 31 = Uncategorized."
+  - id: skimmer-mac-roving
+    type: skimmer
+    label: "MAC prefix of Roving Networks modules"
+    kind: bt
+    mac_prefix: ["00:06:66"]
+    weight: 35
+    source: "Bhaskar et al. 2019, table of MAC prefixes on skimmers: Roving Networks 00:06:66. IEEE OUI registry: MA-L 00-06-66 Roving Networks."
+  - id: skimmer-mac-bolutek
+    type: skimmer
+    label: "MAC prefix of Shenzhen Bolutek modules"
+    kind: bt
+    mac_prefix: ["98:D3:31"]
+    weight: 35
+    source: "Bhaskar et al. 2019, table of MAC prefixes on skimmers: Shenzhen Bolutek 98:D3:31. IEEE OUI registry: MA-L 98-D3-31 Shenzhen Bolutek Technology Co.,Ltd."
+  - id: skimmer-mac-paper-unregistered
+    type: skimmer
+    label: "MAC prefix seen on recovered skimmers"
+    kind: bt
+    mac_prefix: ["20:13:04", "20:17:11", "20:18:01", "20:18:04", "20:18:07", "20:18:08", "20:18:09", "20:18:10", "20:18:11", "98:D3:35"]
+    weight: 30
+    source: "Bhaskar et al. 2019, table of MAC prefixes on skimmers, maker 'Unknown' (date-like prefixes that are not in the IEEE registry)."

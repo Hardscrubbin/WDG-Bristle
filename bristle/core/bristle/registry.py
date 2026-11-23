@@ -28,6 +28,7 @@ class NodeRecord:
     cap_ble: bool = True
     pin: str | None = None        # manual band pin: None, "24", "5", "5lo", "5hi", "ble"
     usb_key: str = ""             # the USB device it was last seen on (link_usb.usb_key)
+    role: int = 0                 # 0 node, 1 ESP-NOW bridge (last reported)
     adopted_at: float = field(default_factory=time.time)
     last_seen: float = 0.0
 

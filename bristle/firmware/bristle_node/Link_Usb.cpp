@@ -37,7 +37,7 @@ void UsbLink::poll() {
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c != '\n' && c != '\r') {
-      if (len_ < bp::LINE_MAX_BYTES) buf_[len_++] = c;
+      if (len_ < bp::LINE_RELAY_MAX_BYTES) buf_[len_++] = c;
       else overflow_ = true;
       continue;
     }
@@ -48,7 +48,7 @@ void UsbLink::poll() {
       // A protocol line ends in '*' and four CRC digits. Anything else is someone typing.
       if (len_ > 6 && buf_[len_ - 5] == '*') {
         codec::Msg m;
-        if (codec::parseLine(buf_, len_, m)) {
+        if (codec::parseLine(buf_, len_, m, bp::LINE_RELAY_MAX_BYTES)) {
           lastRxMs = millis();
           node::onMessage(*this, m);
         } else {

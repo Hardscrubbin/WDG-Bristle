@@ -12,8 +12,15 @@ Rules (decide() below is the whole of it):
   * otherwise there is no position for it: it is counted as "no GPS" and not written.
 Nothing is ever written at 0,0, and nothing is written at a position from a later time.
 
+The track runs on "track time" (gpsplace.ClockMap): it follows the monotonic clock, so a
+correction of the uConsole's clock mid-drive moves neither the fixes nor the finds stamped before
+it. The track is also kept on disk by the service, so finds a node made before the game was
+restarted are still placed.
+
 Only a find that has been written, or counted as dropped, is acknowledged to the node. Until then
 the node keeps it in its flash queue.
+
+Everything that touches the game goes through host.WdgHost.
 """
 from __future__ import annotations
 
@@ -22,6 +29,7 @@ import time
 
 from . import proto
 from .gpsplace import Fix, GpsTrack
+from .host import WdgHost
 
 PLACE, HOLD, DROP = "place", "hold", "drop"
 WAIT_FOR_NEXT_FIX_S = 7.0        # how long past its own time a find waits for the GPS to catch up
@@ -38,15 +46,22 @@ AUTH_NAMES = {
 }
 
 
-def decide(track: GpsTrack, find_time: float, now: float):
-    """(PLACE, fix) | (HOLD, None) | (DROP, reason). ``now`` is this core's clock (unix seconds)."""
-    fix = track.place(find_time)
+def decide(track: GpsTrack, find_time: float, now: float, clock=None):
+    """(PLACE, fix) | (HOLD, None) | (DROP, reason).
+
+    Without ``clock``: find_time and now are both on the track's own time. With a ClockMap:
+    find_time is the node's (wall-clock) time and is turned into track time first; ``now`` is
+    track time."""
+    when = find_time if clock is None else clock.to_track(find_time)
+    if when is None:
+        return DROP, "no GPS position at that time"          # the game was not running then
+    fix = track.place(when)
     if fix is not None:
         return PLACE, fix
     latest = track.latest_time()
-    if latest is not None and latest > find_time:
+    if latest is not None and latest > when:
         return DROP, "no GPS position at that time"          # the track has moved past it
-    if now - find_time <= WAIT_FOR_NEXT_FIX_S:
+    if now - when <= WAIT_FOR_NEXT_FIX_S:
         return HOLD, None                                     # the next fix may still cover it
     return DROP, "no GPS fix"
 
@@ -69,13 +84,19 @@ def fix_time(sample: dict, mono_now: float, wall_now: float) -> float:
 
 
 class Ingest:
-    """Owned by the plugin; every method runs on the game thread."""
+    """Owned by the plugin; every method runs on the game thread.
 
-    def __init__(self, app, delivery, say=lambda text: None) -> None:
-        self.app = app
+    ``service`` (the BristleService) brings the shared track, its clock map, the queue of fixes to
+    save and the nearby engine. Without it (unit tests of the placing rules) the ingest keeps a
+    track of its own on plain wall-clock time."""
+
+    def __init__(self, app, delivery, say=lambda text: None, service=None) -> None:
+        self.host = app if isinstance(app, WdgHost) else WdgHost(app)
         self.delivery = delivery
         self.say = say
-        self.track = GpsTrack()
+        self.service = service
+        self.track = service.track if service is not None else GpsTrack()
+        self.clock = service.clock if service is not None else None
         self.incoming = collections.deque()        # appended by link threads (append is thread-safe)
         self.held = collections.deque()
         self.counts = collections.Counter()        # written_wifi, written_bt, no_gps, not_saved, ...
@@ -88,26 +109,27 @@ class Ingest:
 
     # ------------------------------------------------------------------ GPS
     def feed_gps(self, mono_now=None, wall_now=None) -> None:
-        gps = getattr(self.app, "gps", None)
-        sample = None
-        try:
-            sample = gps.wardrive_sample() if gps is not None else None
-        except Exception:
-            sample = None
+        mono_now = time.monotonic() if mono_now is None else mono_now
+        wall_now = time.time() if wall_now is None else wall_now
+        if self.clock is not None and self.clock.note(mono_now, wall_now):
+            self.service.clock_jumped = True       # the worker sends every node the time again
+        sample = self.host.gps_sample()
         if not sample or sample.get("observed_at") == self._last_sample:
             return
         self._last_sample = sample.get("observed_at")
-        mono_now = time.monotonic() if mono_now is None else mono_now
-        wall_now = time.time() if wall_now is None else wall_now
         try:
             hdop = float(sample.get("hdop") or 0.0)
-            fix = Fix(fix_time(sample, mono_now, wall_now), float(sample["lat"]), float(sample["lon"]),
+            measured = (self.clock.track_time(float(sample["observed_at"])) if self.clock is not None
+                        else fix_time(sample, mono_now, wall_now))
+            fix = Fix(measured, float(sample["lat"]), float(sample["lon"]),
                       float(sample.get("altitude") or 0.0),
                       round(hdop * 5.0, 1) if 0 < hdop < 99 else 0.0)   # the same metres LootManager derives
         except (KeyError, TypeError, ValueError):
             return
         if self.track.add(fix):
             self.last_gps_wall = wall_now
+            if self.service is not None:
+                self.service.gps_out.append(fix)   # the worker appends it to the track on disk
 
     # ------------------------------------------------------------------ finds
     def add(self, find) -> None:
@@ -124,15 +146,24 @@ class Ingest:
 
     def drain(self, budget_s=FRAME_BUDGET_S, final=False, now=None) -> None:
         """Deal with waiting finds for at most budget_s. final=True: nothing may stay held."""
+        if self.service is not None and not self.service.track_ready and not final:
+            return                                 # the saved track is still being read back
         deadline = time.perf_counter() + budget_s
-        now = time.time() if now is None else now
+        if now is None:
+            now = time.time()
+            if self.clock is not None:
+                try:
+                    now = self.clock.track_time(time.monotonic())
+                except RuntimeError:
+                    return                         # no clock reading yet: next frame
+        nearby = self.service.nearby if self.service is not None else None
         again = collections.deque()
         for queue in (self.held, self.incoming):
             while queue:
                 if not final and time.perf_counter() >= deadline:
                     break
                 find = queue.popleft()
-                action, value = decide(self.track, find.t, now)
+                action, value = decide(self.track, find.t, now, self.clock)
                 if action == HOLD and not final:
                     again.append(find)
                     continue
@@ -144,6 +175,11 @@ class Ingest:
                         self.say("[BRISTLE] Could not save a find from node %s: %s" % (find.node, exc))
                 else:
                     self.counts["no_gps"] += 1
+                if nearby is not None:              # alerts need no position; following does
+                    from .nearby_engine import observation_from_find
+                    observation = observation_from_find(find, value if action == PLACE else None)
+                    if observation is not None:
+                        nearby.incoming.append(observation)
                 self.delivery.node(find.hwid).processed(find.seq)
         self.held = again + self.held              # what was not reached keeps its place
         while len(self.held) > MAX_HELD:
@@ -153,8 +189,7 @@ class Ingest:
 
     # ------------------------------------------------------------------ loot
     def _write(self, find, fix) -> None:
-        loot = getattr(self.app, "loot", None)
-        if loot is None:
+        if not self.host.has_loot():
             self.counts["not_saved"] += 1
             return
         position = {"lat": round(fix.lat, 7), "lon": round(fix.lon, 7),
@@ -162,73 +197,41 @@ class Ingest:
         fields = find.fields
         rssi = int(fields.get("r", "-100") or -100)
         if find.kind == "AP":
-            self._write_wifi(loot, find, fix, position, fields, rssi)
+            self._write_wifi(find, fix, position, fields, rssi)
         else:
-            self._write_bt(loot, find, fix, position, fields, rssi)
+            self._write_bt(find, fix, position, fields, rssi)
         self._recent.append(time.monotonic())
 
-    def _write_wifi(self, loot, find, fix, position, fields, rssi) -> None:
-        from watchdogs.app_state import Network
+    def _write_wifi(self, find, fix, position, fields, rssi) -> None:
         channel = int(fields.get("c", "0") or 0)
         bssid = colon_mac(fields["b"])
-        net = Network(ssid=csv_safe(fields.get("e", "")), bssid=bssid, channel=str(channel),
-                      auth=AUTH_NAMES.get(int(fields.get("k", "15") or 15), "UNKNOWN"), rssi=str(rssi),
-                      band="5" if channel > 14 else "2.4")
-        if not loot.save_wardriving_network(net, observed_at=find.t, position=position,
-                                            positioned_only=True, append_new=True):
+        net = self.host.save_wifi(csv_safe(fields.get("e", "")), bssid, channel,
+                                  AUTH_NAMES.get(int(fields.get("k", "15") or 15), "UNKNOWN"), rssi,
+                                  find.t, position)
+        if net is None:
             self.counts["not_saved"] += 1
             return
         self.counts["written_wifi"] += 1
-        app = self.app
-        state = getattr(app, "state", None)
-        if state is not None and bssid not in self._scan_bssids:
+        if bssid not in self._scan_bssids:
             self._scan_bssids.add(bssid)
-            if all(getattr(n, "bssid", None) != bssid for n in state.networks):
-                state.networks.append(net)
-        known, gain = getattr(app, "_known_wifi", None), getattr(app, "gain_xp", None)
-        if known is None or gain is None:
-            return
-        if bssid in known:
-            gain(1)                                 # seen before: the same XP as every other source
-            return
-        known.add(bssid)
-        gain(15)
-        app.msg("[WiFi] %s Ch:%d (node %s)" % (net.ssid, channel, find.node))
-        self._sprite("WifiNetwork", "wifi_networks", fix, bssid, net.ssid, channel, rssi)
+            self.host.list_network(net)
+        if self.host.credit("wifi", bssid, 15):
+            self.host.message("[WiFi] %s Ch:%d (node %s)" % (net.ssid, channel, find.node))
+            self.host.marker("wifi", fix.lat, fix.lon, bssid, net.ssid, channel, rssi)
 
-    def _write_bt(self, loot, find, fix, position, fields, rssi) -> None:
+    def _write_bt(self, find, fix, position, fields, rssi) -> None:
         mac = colon_mac(fields["m"])
         name = csv_safe(fields.get("nm", ""))
-        if not loot.save_wardriving_bt(mac, rssi, name, observed_at=find.t, position=position,
-                                       positioned_only=True, append_new=True):
+        if not self.host.save_bt(mac, rssi, name, find.t, position):
             self.counts["not_saved"] += 1
             return
         self.counts["written_bt"] += 1
-        session = getattr(loot, "session_path", None)
+        session = self.host.session_dir()
         if session != self._bt_session:
             self._bt_session, self._bt_saved = session, set()
         if mac not in self._bt_saved:
-            loot.save_bt_device(mac, rssi, name, False, False, append_new=True)
+            self.host.save_bt_device(mac, rssi, name)
             self._bt_saved.add(mac)
-        app = self.app
-        known, gain = getattr(app, "_known_ble", None), getattr(app, "gain_xp", None)
-        if known is None or gain is None:
-            return
-        if mac in known:
-            gain(1)
-            return
-        known.add(mac)
-        gain(10)
-        app.msg("[BLE] %s %s %ddBm (node %s)" % (name, mac[-8:], rssi, find.node))
-        self._sprite("BleDevice", "ble_devices", fix, mac, name, rssi)
-
-    def _sprite(self, cls_name, list_name, fix, *args) -> None:
-        """A marker on the map, at the place the find was made."""
-        try:
-            import pyxel
-            from watchdogs import app as game
-            sprite = getattr(game, cls_name)(fix.lat, fix.lon, *args)
-            sprite.spawn_frame = pyxel.frame_count
-            getattr(self.app, list_name).append(sprite)
-        except Exception:
-            pass                                    # the find is saved; only the marker is missing
+        if self.host.credit("bt", mac, 10):
+            self.host.message("[BLE] %s %s %ddBm (node %s)" % (name, mac[-8:], rssi, find.node))
+            self.host.marker("bt", fix.lat, fix.lon, mac, name, rssi)

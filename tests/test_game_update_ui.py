@@ -42,8 +42,8 @@ class FakeUpdates:
         self.seen = set()
         self.notice_pending = Mock(side_effect=lambda release: release.release_id not in self.seen)
         self.acknowledge = Mock(side_effect=lambda release: self.seen.add(release.release_id) or True)
-        self.notice_key = Mock(side_effect=lambda release: "github:1441947361:" + release.channel + ":" + release.release_id)
-        self.source_info = Mock(return_value=dict(repository_id=1441947361,
+        self.notice_key = Mock(side_effect=lambda release: "github:123456789:" + release.channel + ":" + release.release_id)
+        self.source_info = Mock(return_value=dict(repository_id=123456789,
             repository="Hardscrubbin/WDG-Bristle",
             url="https://github.com/Hardscrubbin/WDG-Bristle", verified=False))
         self.check = Mock()
@@ -571,7 +571,7 @@ class GameUpdateUiTests(unittest.TestCase):
         self.assertEqual(*positions)
 
     def verified_source(self, g, repository="Hardscrubbin/WDG-Bristle"):
-        g._game_updates.source_info.return_value = dict(repository_id=1441947361,
+        g._game_updates.source_info.return_value = dict(repository_id=123456789,
             repository=repository, url="https://github.com/" + repository, verified=True)
 
     def test_source_header_is_cached_and_follows_verified_rename(self):
@@ -749,7 +749,7 @@ class GameUpdateUiTests(unittest.TestCase):
         self.assertEqual(g._game_updates.acknowledge.call_count, 1)
 
     def test_boot_keeps_locosp_and_adds_modified_credit_below(self):
-        labels = ("by LOCOSP", "WDG-Bristle 1.0")
+        labels = ("by LOCOSP", "WDG-Bristle 1.1")  # [bristle] the build's name and version
         # Measured from the real Spleen 5x8 Font.text_width API. The second
         # path covers its absence and Pyxel's built-in four-pixel advance.
         font = SimpleNamespace(text_width=Mock(side_effect=dict(zip(labels, (45, 115))).__getitem__))

@@ -21,7 +21,7 @@ HEADER = "%-3s %-12s %-4s %-9s %-30s %6s %5s %4s %4s %7s %5s %4s %6s" % (
 LINKS = {proto.LINK_USB: "USB", proto.LINK_ESPNOW: "NOW", proto.LINK_BLE: "BLE"}
 PINS = (None, "24", "5", "5lo", "5hi", "ble")
 PIN_NAMES = {None: "auto", "24": "2.4 GHz", "5": "5 GHz", "5lo": "5 GHz low", "5hi": "5 GHz high", "ble": "Bluetooth"}
-KEYS_1 = "[S] start/stop  [A] adopt  [I] identify  [P] pin band  [B] block/unblock  [X] not a node"
+KEYS_1 = "[S] start/stop  [A] adopt  [I] identify  [P] pin band  [B] block/unblock  [X] not a node  [W] flash board  [G] bridge"
 KEYS_2 = "[F] forget  [R] renumber  [U] update firmware  [K] owner key  [H] HUD  [UP/DOWN] select  [ESC] back"
 
 
@@ -73,7 +73,9 @@ def node_rows(service, now_mono=None, now_wall=None) -> list:
     now_wall = time.time() if now_wall is None else now_wall
     fleet, registry = service.fleet, service.registry
     sessions = list(fleet.sessions)
-    live = {s.hwid: s for s in fleet.authed()}
+    live = {s.hwid: s for s in fleet.authed() + fleet.bridges()}
+    update = getattr(service, "ota", None)
+    hub = getattr(service, "hub", None)
     rows = []
     for rec in sorted(list(registry.nodes.values()), key=lambda r: r.number):
         s = live.get(rec.hwid)
@@ -89,10 +91,20 @@ def node_rows(service, now_mono=None, now_wall=None) -> list:
             state = "scanning" if h.flags & proto.HB_RUNNING else "idle"
             if not h.flags & proto.HB_CLOCK:
                 state = "no clock"
+            what = channels_text(s.desired.plan, rec.pin)
+            if s.is_bridge:
+                state = "bridge"
+                stats = getattr(hub, "bridge_stats", None) or {}
+                what = "relays ESP-NOW: %d node(s), rx %s tx %s" % (
+                    len(getattr(hub, "peers", ())), stats.get("rx", "-"), stats.get("tx", "-"))
+            if h.flags & proto.HB_OTA_PENDING:
+                state = "new build"
+            if update is not None and update.hwid == rec.hwid and update.sender.active:
+                state = "upd %d%%" % update.sender.percent
             age = now_mono - h.at if h.at else None
-            row.update(text=HEADER_FORMAT % (
+            row.update(bridge=s.is_bridge, text=HEADER_FORMAT % (
                 rec.number, clip(row["name"], 12), LINKS.get(s.link_type, "?"), state,
-                clip(channels_text(s.desired.plan, rec.pin), 30), h.backlog, h.dropped, "%d%%" % h.fill_pct,
+                clip(what, 30), h.backlog, h.dropped, "%d%%" % h.fill_pct,
                 "-" if h.temp_c is None else "%dC" % h.temp_c, duration(h.uptime_s),
                 "-" if h.ram_kb is None else "%dK" % h.ram_kb, h.build, "now" if age is not None and age < 5 else duration(age)),
                 colour=C_ERR if h.dropped else C_WARN if (age is not None and age > 9) or state == "no clock" else C_OK)
@@ -109,6 +121,10 @@ def node_rows(service, now_mono=None, now_wall=None) -> list:
         elif s.state == S.NOT_OURS:
             rows.append(dict(kind="other", hwid=s.hwid, session=s, colour=C_DIM, text=clip(
                 "OTHER OWNER  hw %s (%s): ignored. Free it with its BOOT button (5 s) to adopt it.   [B] block" % (s.hwid, s.board))))
+        elif s.state == S.BUSY:
+            rows.append(dict(kind="busy", hwid=s.hwid, session=s, colour=C_WARN, text=clip(
+                "BUSY  hw %s: another core is running this node. Left alone; asked again every %d s." % (
+                    s.hwid, proto.BUSY_RETRY_MS // 1000))))
     for key, (port, reason) in list(service.new_ports.items()):
         rows.append(dict(kind="port", key=key, port=port, colour=C_WARN, text=clip(
             "NEW PORT  [A] say hello   [X] not a node   %s (%s, serial %s)" % (
@@ -147,8 +163,39 @@ def coverage(service) -> tuple:
     return channels, cover
 
 
+def links_text(service) -> str:
+    """The right end of the title bar: the Bluetooth link and the bridge, in a few words."""
+    parts = ["owner key: set"]
+    ble = getattr(service, "ble", None)
+    if ble is None:
+        parts.append("BLE link: %s" % getattr(service, "ble_note", "off"))
+    elif ble.status.get("error"):
+        parts.append("BLE link: off (%s)" % clip(ble.status["error"], 34))
+    else:
+        parts.append("BLE %s: %d/%d linked%s" % (ble.adapter, ble.status.get("linked", 0), ble.limit,
+                                                 ", LIMIT: %d waiting" % ble.status["waiting"] if ble.status.get("waiting") else ""))
+    hub = getattr(service, "hub", None)
+    if hub is not None:
+        parts.append("bridge: %s" % ("%d node(s)" % len(hub.peers) if hub.bridge is not None else "none"))
+    return clip("   ".join(parts), 86)
+
+
+def job_text(service):
+    """One line about a firmware update or a flash in progress (or just finished): (text, colour)."""
+    flash = getattr(service, "flash", None)
+    if flash is not None and flash.state in ("waiting", "erasing", "writing"):
+        return clip("Flashing %s: %s  %s" % (flash.port, flash.state, flash.line)), C_WARN
+    update = getattr(service, "ota", None)
+    if update is not None and (update.sender.active or (update.finished and time.monotonic() - update.finished < 60)):
+        failed = update.sender.state == "failed"
+        return clip(update.text()), C_ERR if failed else C_OK if not update.sender.active else C_WARN
+    if flash is not None and flash.state == "failed":
+        return clip("Flash failed: %s" % flash.error), C_ERR
+    return None
+
+
 def hud_lines(service, ingest) -> list:
-    """What the activity line on the map says: [(text, colour)], at most two."""
+    """What the activity line on the map says: [(text, colour)], at most three."""
     t = service.fleet.totals()
     if not t["known"] and not service.new_ports:
         return []
@@ -166,6 +213,10 @@ def hud_lines(service, ingest) -> list:
         warn = "no GPS fix: finds are not being placed"
     if warn:
         lines.append((warn, C_WARN))
+    nearby = getattr(service, "nearby", None)
+    alert = nearby.center.hud_line() if nearby is not None else ""
+    if alert:
+        lines.append(("! " + alert, C_ERR))
     return [(clip(text, 56), colour) for text, colour in lines]
 
 
@@ -186,7 +237,7 @@ def draw(pyxel, w, h, service, ingest, rows, selected, status, kismet_active) ->
     pyxel.rect(0, 0, w, h, C_BG)
     pyxel.rect(0, 0, w, 12, C_BAR)
     pyxel.text(4, 3, "BRISTLE: NODES", C_TITLE)
-    right = "owner key: set   Bluetooth adapter for Bristle: %s" % service.conf.get("ble_adapter", "hci0")
+    right = links_text(service)
     pyxel.text(w - 4 - FONT_W * len(right), 3, right, C_DIM)
     pyxel.text(4, 16, totals_text(service, ingest), C_TEXT)
     pyxel.text(4, 28, HEADER, C_TITLE)
@@ -204,8 +255,8 @@ def draw(pyxel, w, h, service, ingest, rows, selected, status, kismet_active) ->
     # channel coverage: which nodes cover each channel (and whether Kismet is hopping too)
     channels, cover = coverage(service)
     cy = 218
-    pyxel.text(4, cy, "CHANNEL COVERAGE (node numbers under each channel)%s" % (
-        "   Kismet: capturing, hopping its own channels" if kismet_active else "   Kismet: not capturing"), C_TITLE)
+    note = getattr(service, "kismet_note", lambda: "")() or ("Kismet: capturing" if kismet_active else "Kismet: not capturing")
+    pyxel.text(4, cy, clip("CHANNEL COVERAGE (node numbers under each channel)   %s" % note), C_TITLE)
     cell = (w - 8) // max(1, len(channels))
     for index, ch in enumerate(channels):
         x = 4 + index * cell
@@ -218,10 +269,13 @@ def draw(pyxel, w, h, service, ingest, rows, selected, status, kismet_active) ->
         s = row["session"]
         plan = s.desired.plan if s is not None else None
         detail = "Node %d  hw %s  %s" % (row["number"], row["hwid"], channels_text(plan, row["pin"]))
-        pyxel.text(4, cy + 36, clip(detail), C_DIM)
+        pyxel.text(4, cy + 38, clip(detail), C_DIM)
     for index, (text, kind) in enumerate(list(service.messages)[-6:]):
         colour = {"error": C_ERR, "warn": C_WARN, "ok": C_OK}.get(kind, C_DIM)
-        pyxel.text(4, 266 + index * 9, clip(text), colour)
+        pyxel.text(4, 267 + index * 9, clip(text), colour)
+    job = job_text(service)
+    if job:
+        pyxel.text(4, 246, job[0], job[1])
     if status:
         pyxel.text(4, h - 33, clip(status[0]), status[1])
     pyxel.text(4, h - 22, KEYS_1, C_DIM)

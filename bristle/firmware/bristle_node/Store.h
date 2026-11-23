@@ -11,6 +11,8 @@ struct NodeState {
   uint32_t session = 0;
   uint32_t repeatApMs = 0;
   uint32_t repeatBleMs = 0;
+  uint8_t role = 0;        // bp::ROLE_NODE / bp::ROLE_BRIDGE
+  uint8_t channel = 0;     // ESP-NOW control channel; 0 = the ESP-NOW link is off
 };
 
 namespace store {
@@ -22,6 +24,14 @@ void saveNumber(uint16_t n);
 void savePlan(const String& plan);
 void saveRun(uint8_t mask, uint32_t session);
 void saveRepeat(uint32_t ap, uint32_t ble);
+void saveRole(uint8_t role);
+void saveChannel(uint8_t channel);
+
+// ESP-NOW frame counters (docs/PROTOCOL.md, "The counter survives restarts"). They only ever go up,
+// and they outlive a forgotten owner: a counter is never used twice with any key.
+uint32_t reserveFrameCounters(uint32_t atLeast, uint32_t block);   // first counter of a fresh send block
+uint32_t frameFloor();                                             // lowest counter still accepted
+void burnFrameFloor(uint32_t floor);
 void forgetAll();                       // owner, number, plan, run (queue cleared separately)
 
 // Sequence numbers are reserved in blocks so a reboot never reuses one.

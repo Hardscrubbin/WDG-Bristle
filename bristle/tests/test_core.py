@@ -454,8 +454,11 @@ class SessionKeepingInStep(unittest.TestCase):
     def test_idle_link_is_pinged_and_clock_is_resent(self):
         s = self.make()
         self.hello(s)
+        self.heartbeat(s)                      # the node hears its repeat times once and confirms them
+        s.feed_line(codec.build("RSP", {"c": "REPEAT", "ok": 1}))
         s.tick()                               # the first ack goes out
         self.assertEqual(self.count("TIME"), 1)
+        self.assertEqual(self.count("REPEAT"), 1)
         self.assertEqual(self.count("PING"), 0)
         self.now.t += proto.CORE_PING_MS / 1000 + 0.1
         self.heartbeat(s)

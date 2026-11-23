@@ -23,6 +23,7 @@ product:
 # ---------------------------------------------------------------------------------------------
 line:
   max_bytes: 240                # longest line including '*CRC\n' (fits a BLE notify and ESP-NOW)
+  relay_max_bytes: 400          # ETX/ERX only (core <-> bridge over USB): they carry a whole ESP-NOW frame
   crc: crc16_ccitt_false
   unreserved: "A-Za-z0-9-_.~/"
 
@@ -30,20 +31,34 @@ line:
 # ESP-NOW frame (node <-> bridge). Binary, little-endian:
 #   magic  'B','R'            2
 #   ver    u8 (=protocol)     1
-#   kind   u8                 1   0 = lines, 1 = poll (node checks in, empty payload)
+#   kind   u8                 1   0 = lines, 1 = poll (node checks in, empty payload), 2 = sync
 #   ctr    u32                4   per-sender counter, strictly increasing; replays are dropped
 #   frag   u8                 1   high nibble = index, low nibble = count (0x01 = not fragmented)
 #   len    u8                 1   payload length
 #   payload                   len bytes: one or more lines WITHOUT '*CRC', '\n'-separated
 #   tag    8 bytes                HMAC-SHA256(owner_key, "bristle-frame" || all bytes before tag)[:8]
 # Unowned nodes can't send signed frames, so adoption is over USB only (see adoption).
+#
+# The counter survives reboots, on both ends. A sender takes its counters from blocks of
+# counter_block that it reserves in permanent storage, and starts a fresh block at every boot, so
+# it never uses a counter twice. A receiver remembers the highest counter it accepted; the first
+# time it accepts a counter in a block it writes down "after a restart, accept nothing below the
+# end of this block". A frame at or below what the receiver has is dropped, and the receiver answers
+# with a sync frame (kind 2, payload = u32 little-endian: "use a counter of at least this"). The
+# sender then jumps forward. A sync frame is checked for its tag but not for its counter: all it
+# can do is move the other side's counter up, so replaying one does nothing.
+#
+# Fragments: a payload is whole lines, as many as fit. A line too long for one frame is sent alone,
+# cut into count pieces with consecutive counters; a missing or out-of-order piece drops the line.
 # ---------------------------------------------------------------------------------------------
 espnow_frame:
   magic: "BR"
   header_bytes: 10
   tag_bytes: 8
   max_bytes: 250                # ESP-NOW v1 payload limit
-  kinds: {lines: 0, poll: 1}
+  kinds: {lines: 0, poll: 1, sync: 2}
+  counter_block: 4096           # counters are reserved (sender) and burned (receiver) in blocks this big
+  max_fragments: 15
   hmac_label: "bristle-frame"
 
 # ---------------------------------------------------------------------------------------------
@@ -87,7 +102,7 @@ adoption:
 #   The node reports the hash of the plan it holds; the core resends the plan until it matches.
 # ---------------------------------------------------------------------------------------------
 plan:
-  flags: {wifi: 1, ble: 2}
+  flags: {wifi: 1, ble: 2, ble_active: 4}   # ble_active: also ask for scan responses. Off = listen only
   max_entries: 64
   dwell_ms: {min: 30, max: 1000, default: 120}
   regions:
@@ -126,6 +141,10 @@ heartbeat_flags:
   QUEUE_FLASH: 64               # queue is backed by flash
   OTA_SLOTS: 128                # has two OTA app slots
   IDENTIFYING: 256              # LED blinking for identify
+  BRIDGE: 512                   # this board is the ESP-NOW bridge: it relays, it does not scan
+  OTA_PENDING: 1024             # running a freshly updated image that is not confirmed yet
+
+roles: {node: 0, bridge: 1}
 
 run_mask: {wifi: 1, ble: 2}
 
@@ -135,6 +154,7 @@ timing:
   ack_min_interval_ms: 500
   resend_stall_ms: 10000
   queue_save_ms: 15000          # flush the RAM queue to flash at least this often while running
+  queue_state_save_ms: 60000    # the ack point alone is written to flash at most this often
   repeat_ap_ms: 300000          # a node re-reports the same BSSID only after this long
   repeat_ble_ms: 30000
   usb_hello_wait_ms: 1500       # discovery: wait this long for HELLO after HI
@@ -143,8 +163,21 @@ timing:
   link_timeout_ms: 20000        # a node that hears nothing valid for this long treats the link as gone
   time_resync_ms: 600000        # the core sends TIME again this often (node clocks drift)
   espnow_visit_interval_ms: 1500   # a scanning node returns to the control channel this often
-  espnow_visit_window_ms: 40       # and listens/sends for this long
+  espnow_visit_window_ms: 12       # it listens this long after its last frame, and again after each frame it gets
+  espnow_visit_max_ms: 60          # but never stays longer than this
+  espnow_visit_frames: 8           # frames a node sends per visit, at most
+  espnow_lost_ms: 20000            # no valid frame from the core for this long: the bridge is lost
+  espnow_search_ms: 10000          # a node with no bridge looks for one this often (after the first minute)
   espnow_control_channel: 1
+  espnow_mailbox_frames: 8         # frames the bridge holds for one node until that node checks in
+  espnow_mailbox_ms: 30000         # ... and for how long
+  beacon_ms: 1000                  # USB only: a board no core has spoken to says BCN this often
+  ble_link_interval_ms: 1000       # with a Bluetooth link up, the radio is left to it this often
+  ble_link_slot_ms: 150            # ... for this long
+  ota_confirm_ms: 300000           # an updated node that has not met its owner by then goes back
+  busy_retry_ms: 30000             # a core that found the fleet busy asks again this often
+  watch_report_ms: 200             # hunt mode: a watched device is reported at most this often
+  watch_max_s: 900                 # ... and a watch ends by itself after this long
 
 # ---------------------------------------------------------------------------------------------
 # The node's find queue (RAM + LittleFS). Not on the wire, but the limits live here with the rest.
@@ -173,15 +206,26 @@ ble:
   command_uuid: "7b1f2c3a-5d4e-4b6f-9a80-b1e5711e0002"
   notify_uuid:  "7b1f2c3a-5d4e-4b6f-9a80-b1e5711e0003"
   mtu: 247
+  # A node advertises the service UUID with 7 bytes of service data: its hwid (6) and one flag
+  # byte (bit 0: it has an owner). Its name (BRISTLE-<n>) goes in the scan response.
+  adv_flag_owned: 1
+  max_links: 5                  # nodes the core links over Bluetooth at once (the adapter's limit is near 7)
+
+ota:
+  chunk_bytes: 144              # image bytes per OTA chunk line (fits a line on every link)
+  window: 4                     # chunks the core sends before it waits for the node's OTAS
 
 # ---------------------------------------------------------------------------------------------
 # Messages. dir: c2n = core to node, n2c = node to core. req = required fields.
 # Every command may carry id=<1-8 hex> and the node answers RSP with the same id.
 # ---------------------------------------------------------------------------------------------
 messages:
-  HI:     {dir: c2n, req: [v, cn], doc: "Core hello with a fresh nonce. Starts the handshake."}
-  HELLO:  {dir: n2c, req: [v, hw, bd, b, cap, nn], opt: [np, oid, n, nm],
-           doc: "Node hello: protocol v, hwid hw, board bd, build b, capability flags cap, node nonce nn, node proof np (if owned), owner id oid, node number n, name nm."}
+  HI:     {dir: c2n, req: [v, cn], opt: [ci],
+           doc: "Core hello with a fresh nonce. Starts the handshake. ci = this core's id (8 hex): a node that another core is running answers RSP busy on a wireless link."}
+  HELLO:  {dir: n2c, req: [v, hw, bd, b, cap, nn], opt: [np, oid, n, nm, ro],
+           doc: "Node hello: protocol v, hwid hw, board bd, build b, capability flags cap, node nonce nn, node proof np (if owned), owner id oid, node number n, name nm, role ro."}
+  BCN:    {dir: n2c, req: [hw, bd, b], opt: [o, ro],
+           doc: "USB only, unasked, every beacon_ms while no core has said HI on this port: a Bristle board is here. o=1 if it has an owner. Lets a program tell a Bristle board from another ESP32 without writing to the port."}
   AUTH:   {dir: c2n, req: [cp], doc: "Core proof. Completes the handshake."}
   ADOPT:  {dir: c2n, req: [k, n], doc: "USB only, unowned nodes only: owner key k (32 hex) and node number n."}
   TIME:   {dir: c2n, req: [u], doc: "Clock: unix seconds (UTC), may carry ms= for milliseconds. An owned node takes it only from its authenticated owner."}
@@ -194,16 +238,23 @@ messages:
   IDENT:  {dir: c2n, req: [d], doc: "Blink the LED for d seconds (0 = stop)."}
   REPEAT: {dir: c2n, req: [ap, ble], doc: "Repeat suppression windows in ms."}
   FORGET: {dir: c2n, req: [], doc: "Owning core frees the node (clears owner, number, plan, queue)."}
+  ROLE:   {dir: c2n, req: [r], doc: "Role (roles above): 0 node, 1 bridge. USB only. The board restarts in the new role."}
+  ESPN:   {dir: c2n, req: [ch], doc: "ESP-NOW control channel (1-13; 0 switches the ESP-NOW link off on this board)."}
+  WATCH:  {dir: c2n, req: [m, d], doc: "Hunt mode: for d seconds (0 = stop) listen for Bluetooth LE only and report every advertisement from MAC m as SEEN. Nothing is sent to that device."}
+  ETX:    {dir: c2n, req: [to, d], doc: "Bridge only: hold this ESP-NOW frame (d, base64url) for node MAC to and send it when that node checks in."}
   OTA:    {dir: c2n, req: [op], opt: [size, sha, o, d],
-           doc: "op=begin (size, sha=sha256 hex) | chunk (o offset, d base64url data) | commit | abort | status."}
+           doc: "op=begin (size, sha=sha256 hex) | chunk (o offset, d base64url data) | verify | commit | abort | status. verify reads the image back from flash and checks the sha; commit makes it the boot image and restarts."}
   RSP:    {dir: n2c, req: [c, ok], opt: [id, e], doc: "Command result: command c, ok=1/0, error e."}
   HB:     {dir: n2c, req: [n, f, ph, m, s, lk, qb, qd, qc, qf, qn, qo, b], opt: [t, up, ram, rs],
            doc: "Heartbeat: node, flags, plan hash, run mask, session, link type, backlog, dropped, capacity, fill %, next seq, oldest seq, build, temp C, uptime s, free RAM KB, link RSSI."}
   AP:     {dir: n2c, req: [q, t, s, b, c, r, k], opt: [e, ms],
            doc: "Wi-Fi AP find: seq, unix time, session, BSSID, channel, RSSI, security, SSID e, ms part of time."}
-  BT:     {dir: n2c, req: [q, t, s, m, r], opt: [at, nm, mf, ms],
-           doc: "BLE find: seq, unix time, session, MAC, RSSI, address type at (0 public, 1 random), name nm, manufacturer company id mf (decimal), ms part of time."}
-  OTAS:   {dir: n2c, req: [st], opt: [o, e], doc: "OTA status: idle|receiving|verifying|ready|error, offset o, error e."}
+  BT:     {dir: n2c, req: [q, t, s, m, r], opt: [at, nm, mf, ms, mt, sv, bh, bo],
+           doc: "BLE find: seq, unix time, session, MAC, RSSI, address type at (0 public, 1 random), name nm, manufacturer company id mf (decimal), ms part of time, first byte of the manufacturer data after the company id mt (decimal), 16-bit service UUIDs sv (4 hex each, joined by '.', three at most), and for an advertisement of another Bristle board its hwid bh and bo=1 if it has an owner."}
+  SEEN:   {dir: n2c, req: [m, r], doc: "Hunt mode (WATCH): the watched MAC was heard just now at RSSI r. Not queued, not numbered."}
+  ERX:    {dir: n2c, req: [fr, d], opt: [rs], doc: "Bridge only: an ESP-NOW frame (d, base64url) arrived from MAC fr at RSSI rs."}
+  BST:    {dir: n2c, req: [rx, tx, tf, mb, md], doc: "Bridge only, with each heartbeat: frames received, sent, failed to send, held in mailboxes now, dropped from mailboxes."}
+  OTAS:   {dir: n2c, req: [st], opt: [o, e], doc: "OTA status: idle|receiving|verifying|ready|error, offset o (the next byte the node wants), error e."}
 
 errors:
   BAD_CRC: "bad CRC"
@@ -215,7 +266,9 @@ errors:
   BAD_PLAN: "bad plan"
   OTA_STATE: "wrong OTA state"
   OTA_VERIFY: "image failed verification"
+  OTA_SPACE: "image does not fit the update slot"
   BUSY: "busy"
+  ROLE: "not in this role"
 
 # ---------------------------------------------------------------------------------------------
 # Test vectors. gen_proto.py computes each "expect" from the reference implementation and fails
@@ -237,3 +290,5 @@ vectors:
     - {key: "000102030405060708090a0b0c0d0e0f", nn: "ffeeddccbbaa99887766554433221100", hw: "a0b1c2d3e4f5", expect: "dd805ce85012e60994f4ff944df11325"}
   frame:
     - {key: "000102030405060708090a0b0c0d0e0f", kind: 0, ctr: 7, frag: 1, payload: "PING:", expect: "4252010007000000010550494e473acf7452ec86a86d6f"}
+    - {key: "000102030405060708090a0b0c0d0e0f", kind: 1, ctr: 4096, frag: 1, payload: "", expect: "4252010100100000010050786423b5ccd5a4"}
+    - {key: "000102030405060708090a0b0c0d0e0f", kind: 0, ctr: 70000, frag: 18, payload: "RSP:c=PING,ok=1", expect: "4252010070110100120f5253503a633d50494e472c6f6b3d31c1c4809167432d02"}

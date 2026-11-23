@@ -4,10 +4,14 @@
 #include <esp_ota_ops.h>
 
 #include "Boards.h"
+#include "Bridge.h"
 #include "BristleProto.h"
 #include "Clock.h"
 #include "Console.h"
 #include "Crypto.h"
+#include "Link_Ble.h"
+#include "Link_EspNow.h"
+#include "Ota.h"
 #include "Owner.h"
 #include "Radio.h"
 
@@ -25,22 +29,28 @@ static const int MAX_LINKS = 3;
 static Link* links[MAX_LINKS];
 static int nLinks = 0;
 static Link* active = nullptr;
+static Link* usb = nullptr;            // the link that allows adoption
 
 // delivery
 static uint32_t sendCursor = 0, lastAckSeen = 0, lastAckMoveMs = 0;
 static uint32_t badLineCount = 0;
 static uint32_t identUntil = 0;
+static uint32_t lastBeaconMs = 0, consoleQuietUntil = 0, restartAt = 0;
+static uint8_t watchMac[6];            // hunt mode: the device being listened for
 
 const NodeState& state() { return st; }
 FindQueue& queue() { return q; }
 const String& hwidHex() { return hwHex; }
 uint32_t badLines() { return badLineCount; }
 Link* activeLink() { return active; }
+bool isBridge() { return st.role == bp::ROLE_BRIDGE; }
 String planText() { return planOk ? radio::canonical(plan) : String(); }
 String name() { return String(bp::NAME_PREFIX) + "-" + (st.number ? String(st.number) : String("NEW")); }
 void badLine() { badLineCount++; }
+void consoleUsed() { consoleQuietUntil = millis() + 60000; }   // someone is typing: no beacon lines for a minute
 void addLink(Link& link) {
   if (nLinks < MAX_LINKS) links[nLinks++] = &link;
+  if (link.allowsAdoption()) usb = &link;
 }
 
 // ------------------------------------------------------------------------------------ helpers
@@ -61,6 +71,8 @@ static uint16_t flagsFor(const Link& link) {
   if (link.authed) f |= bp::HB_AUTHED;
   if (clk::setSinceBoot()) f |= bp::HB_CLOCK;
   if (identUntil && millis() < identUntil) f |= bp::HB_IDENTIFYING;
+  if (isBridge()) f |= bp::HB_BRIDGE;
+  if (ota::onTrial()) f |= bp::HB_OTA_PENDING;
   return f;
 }
 
@@ -76,14 +88,27 @@ static void heartbeat(Link& link) {
   if (link.hasRssi()) l.add("rs", (long)link.rssi());
   link.send(l.finish());
   link.lastHbMs = millis();
+  if (isBridge()) {
+    bridge::Stats s = bridge::stats();
+    codec::LineOut b(bp::MSG_BST);
+    b.addu("rx", s.rx).addu("tx", s.tx).addu("tf", s.txFailed).addu("mb", s.held).addu("md", s.dropped);
+    link.send(b.finish());
+  }
 }
 
 static void sendHello(Link& link) {
   codec::LineOut l(bp::MSG_HELLO);
   l.addu("v", bp::PROTOCOL_VERSION).addRaw("hw", hwHex).add("bd", BRISTLE_BOARD).addu("b", BRISTLE_BUILD);
-  l.addu("cap", flagsFor(link));
+  l.addu("cap", flagsFor(link)).addu("ro", st.role);
   owner::fillHello(link, l);
   link.send(l.finish());
+}
+
+static bool linkFresh(const Link& l, uint32_t now) { return l.authed && now - l.lastRxMs < bp::LINK_TIMEOUT_MS; }
+
+static void applyRun() {
+  // A bridge never scans, and a node being updated gives the radio and the flash to the update.
+  radio::setRun(planOk && !isBridge() && !ota::active() ? st.runMask : 0);
 }
 
 // Finds go out on one link: the authenticated one with the lowest type number (USB is 1).
@@ -96,19 +121,43 @@ static void pickActive() {
     sendCursor = q.ackSeq();   // a new link starts again from the oldest find the core hasn't acked
     lastAckMoveMs = millis();
   }
+  // USB wins: while the core has the node on USB, the node spends no radio time on the other links.
+  bool onUsb = usb && usb->authed;
+  if (!isBridge()) {
+    espLink.pause(onUsb);
+    bleLink.allow(!onUsb);
+  }
 }
 
-static void applyRun() { radio::setRun(planOk ? st.runMask : 0); }
+void linkClosed(Link& link) {
+  ota::linkClosed(link);
+  pickActive();
+}
+
+void updateChanged() {
+  espLink.hurry(ota::active() && ota::link() == &espLink);
+  applyRun();
+}
 
 void identify(uint32_t seconds) { identUntil = seconds ? millis() + seconds * 1000 : 0; }
 
+static void wirelessIdentity() {
+  if (isBridge()) return;
+  espLink.setKey(st.key, st.owned);
+  bleLink.rename(name(), st.owned);
+}
+
 void forgetEverything(const char* why) {
+  uint8_t role = st.role, channel = st.channel;
   st = NodeState();
+  st.role = role;              // what the board is for does not change with its owner
+  st.channel = channel;
   store::forgetAll();
   q.clear();
   clk::forget();
   planOk = false;
   for (int i = 0; i < nLinks; i++) links[i]->authed = false;
+  wirelessIdentity();
   pickActive();
   applyRun();
   console::say(String("owner forgotten (") + why + "): any core can adopt this node over USB now");
@@ -135,9 +184,41 @@ static void onWifi(const WifiFind& f) {
 static void onBle(const BleFind& f) {
   codec::LineOut l(bp::MSG_BT);
   l.addRaw("m", crypto::toHex(f.mac, 6)).add("r", (long)f.rssi).addu("at", f.addrType);
-  if (f.name.length()) l.add("nm", f.name.substring(0, 29));
   if (f.companyId >= 0) l.addu("mf", (unsigned long)f.companyId);
+  if (f.mfgType >= 0) l.addu("mt", (unsigned long)f.mfgType);
+  if (f.nServices) {
+    String sv;
+    char one[6];
+    for (uint8_t i = 0; i < f.nServices; i++) {
+      snprintf(one, sizeof(one), "%s%04x", i ? "." : "", f.services[i]);
+      sv += one;
+    }
+    l.addRaw("sv", sv);
+  }
+  if (f.bristle) {
+    l.addRaw("bh", crypto::toHex(f.bristleHw, 6));
+    if (f.bristleOwned) l.addu("bo", 1);
+  }
+  // The name goes last and only as far as the line has room (a line also carries q, t, ms and s).
+  if (f.name.length()) {
+    String shown = f.name.substring(0, 29);
+    while (shown.length() && l.body().length() + 4 + codec::pctEncode(shown).length() > 180) shown.remove(shown.length() - 1);
+    if (shown.length()) l.add("nm", shown);
+  }
   captured(l.body());
+}
+
+// Hunt mode: the watched device was heard just now. Straight to the core, not through the queue.
+static void onSeen(int8_t rssi) {
+  if (!active || !active->authed) return;
+  codec::LineOut l(bp::MSG_SEEN);
+  l.addRaw("m", crypto::toHex(watchMac, 6)).add("r", (long)rssi);
+  active->send(l.finish());
+}
+
+static void setWatch(const uint8_t mac[6], uint32_t seconds) {
+  memcpy(watchMac, mac, 6);
+  radio::watch(mac, seconds, onSeen);
 }
 
 // A stored find -> the line the core gets: TYPE:q=..,t=..,ms=..,s=..,<the stored fields>*CRC
@@ -158,10 +239,7 @@ static String findLine(const FindQueue::Rec& r, uint32_t sec, uint16_t ms) {
     line += ',';
     line += r.body.substring(colon + 1);
   }
-  char tail[8];
-  snprintf(tail, sizeof(tail), "*%04X\n", codec::crc16((const uint8_t*)line.c_str(), line.length()));
-  line += tail;
-  return line;
+  return codec::withCrc(line);
 }
 
 static void streamFinds(uint32_t now) {
@@ -169,19 +247,22 @@ static void streamFinds(uint32_t now) {
     lastAckSeen = q.ackSeq();
     lastAckMoveMs = now;
   }
-  if (!active || !active->authed || !clk::valid()) return;
+  if (!active || !active->authed || !clk::valid() || ota::active()) return;
   if (sendCursor < q.ackSeq()) sendCursor = q.ackSeq();
   for (int i = 0; i < 8; i++) {
     if (active->room() < bp::LINE_MAX_BYTES + 16) return;   // room for the longest line, or wait
     FindQueue::Rec r;
     if (!q.peek(sendCursor, r)) break;
-    sendCursor = r.seq + 1;
     uint32_t sec;
     uint16_t ms;
     // No time for it (stored by uptime in a boot that never got a clock): never sent. The queue
     // drops and counts it when the ack point gets there.
-    if (!clk::resolve(r.rel, r.boot, r.sec, r.ms, sec, ms)) continue;
-    active->send(findLine(r, sec, ms));
+    if (!clk::resolve(r.rel, r.boot, r.sec, r.ms, sec, ms)) {
+      sendCursor = r.seq + 1;
+      continue;
+    }
+    if (!active->send(findLine(r, sec, ms))) return;        // the link had no room after all: same find next time
+    sendCursor = r.seq + 1;
   }
   // Everything sent, finds still unacked, and the ack hasn't moved for a while: send again from
   // the oldest unacked find.
@@ -195,12 +276,26 @@ static void streamFinds(uint32_t now) {
 void onMessage(Link& link, const codec::Msg& m) {
   const String* id = m.get("id");
   String t(m.type);
+  uint32_t now = millis();
 
   if (t == bp::MSG_HI) {
+    // Only one core runs a node at a time. If another core (another id) holds a live link, a hello
+    // that comes in over the air is answered "busy" and changes nothing. USB always gets through:
+    // whoever has the node on a cable has it in their hands.
+    const String* ci = m.get("ci");
+    if (!link.allowsAdoption() && ci && ci->length()) {
+      for (int i = 0; i < nLinks; i++) {
+        if (linkFresh(*links[i], now) && links[i]->coreId.length() && links[i]->coreId != *ci) {
+          rsp(link, "HI", false, bp::ERR_BUSY, id);
+          return;
+        }
+      }
+    }
     if (!owner::onHi(link, m)) {
       rsp(link, "HI", false, bp::ERR_BAD_FIELD, id);
       return;
     }
+    link.coreId = ci ? *ci : String();
     pickActive();   // this link is no longer authenticated until AUTH arrives
     sendHello(link);
     return;
@@ -223,7 +318,10 @@ void onMessage(Link& link, const codec::Msg& m) {
   }
   if (t == bp::MSG_ADOPT) {
     const char* err = owner::onAdopt(link, m);
-    if (!err) console::say("adopted as node " + String(st.number) + ", owner " + owner::id());
+    if (!err) {
+      console::say("adopted as node " + String(st.number) + ", owner " + owner::id());
+      wirelessIdentity();
+    }
     rsp(link, "ADOPT", err == nullptr, err, id);
     return;
   }
@@ -244,6 +342,21 @@ void onMessage(Link& link, const codec::Msg& m) {
     q.ack((uint32_t)m.getInt("q", 0));
     return;   // no RSP for ACK
   }
+  if (t == bp::MSG_OTA) {
+    ota::handle(link, m, id);
+    return;
+  }
+  if (t == bp::MSG_ETX) {
+    // Bridge only: a frame for one of the nodes. No answer line: the core sends many of these.
+    const String *to = m.get("to"), *d = m.get("d");
+    uint8_t mac[6], frame[bp::FRAME_MAX_BYTES];
+    size_t n = 0;
+    if (!isBridge()) rsp(link, "ETX", false, bp::ERR_ROLE, id);
+    else if (to && d && crypto::fromHex(*to, mac, 6) && codec::b64urlDecode(*d, frame, sizeof(frame), n))
+      bridge::hold(mac, frame, n, now);
+    else badLineCount++;
+    return;
+  }
   if (t == bp::MSG_NUM) {
     long n = m.getInt("n", 0);
     if (n <= 0 || n > 65535) {
@@ -252,6 +365,7 @@ void onMessage(Link& link, const codec::Msg& m) {
     }
     st.number = (uint16_t)n;
     store::saveNumber(st.number);
+    wirelessIdentity();
     rsp(link, "NUM", true, nullptr, id);
   } else if (t == bp::MSG_PLAN) {
     const String *f = m.get("f"), *r = m.get("r"), *c = m.get("c"), *d = m.get("d");
@@ -279,12 +393,50 @@ void onMessage(Link& link, const codec::Msg& m) {
     store::saveRepeat(st.repeatApMs, st.repeatBleMs);
     radio::setRepeat(st.repeatApMs, st.repeatBleMs);
     rsp(link, "REPEAT", true, nullptr, id);
+  } else if (t == bp::MSG_ESPN) {
+    long ch = m.getInt("ch", -1);
+    if (ch < 0 || ch > 13) {
+      rsp(link, "ESPN", false, bp::ERR_BAD_FIELD, id);
+      return;
+    }
+    if ((uint8_t)ch != st.channel) {
+      st.channel = (uint8_t)ch;
+      store::saveChannel(st.channel);
+      if (isBridge()) bridge::setChannel(st.channel);
+      else espLink.setChannel(st.channel);
+    }
+    rsp(link, "ESPN", true, nullptr, id);
+  } else if (t == bp::MSG_ROLE) {
+    long r = m.getInt("r", -1);
+    if (!link.allowsAdoption()) {
+      rsp(link, "ROLE", false, bp::ERR_NOT_USB, id);
+      return;
+    }
+    if (r != bp::ROLE_NODE && r != bp::ROLE_BRIDGE) {
+      rsp(link, "ROLE", false, bp::ERR_BAD_FIELD, id);
+      return;
+    }
+    rsp(link, "ROLE", true, nullptr, id);
+    if ((uint8_t)r != st.role) {
+      st.role = (uint8_t)r;
+      store::saveRole(st.role);
+      console::say(String("role is now ") + (isBridge() ? "bridge" : "node") + ": restarting");
+      restartAt = now + 500;
+    }
+    return;
+  } else if (t == bp::MSG_WATCH) {
+    const String* mac = m.get("m");
+    uint8_t raw[6];
+    long d = m.getInt("d", 0);
+    if (isBridge() || !mac || !crypto::fromHex(*mac, raw, 6) || d < 0) {
+      rsp(link, "WATCH", false, isBridge() ? bp::ERR_ROLE : bp::ERR_BAD_FIELD, id);
+      return;
+    }
+    setWatch(raw, (uint32_t)d);
+    rsp(link, "WATCH", true, nullptr, id);
   } else if (t == bp::MSG_FORGET) {
     rsp(link, "FORGET", true, nullptr, id);
     forgetEverything("core asked");
-    return;
-  } else if (t == bp::MSG_OTA) {
-    rsp(link, "OTA", false, "not in this build yet", id);   // docs/PLAN.md: OTA step
     return;
   } else {
     rsp(link, m.type, false, bp::ERR_UNKNOWN, id);
@@ -326,30 +478,65 @@ void begin() {
   store::load(st);
   clk::begin();
   owner::begin(st, hw);
+  ota::begin();
   q.begin();
   lastAckSeen = sendCursor = q.ackSeq();
 
+  if (isBridge()) {
+    bridge::begin(st.channel);
+    return;                       // a bridge relays: no scanning, no wireless link of its own
+  }
   radio::begin(onWifi, onBle);
   radio::setRepeat(st.repeatApMs, st.repeatBleMs);
   if (st.plan.length() && radio::fromStore(st.plan, plan)) {
     planOk = true;
     radio::setPlan(plan);
   }
+  espLink.begin(st.key, st.owned, st.channel);
+  addLink(espLink);
+  bleLink.begin(hw, name(), st.owned);
+  addLink(bleLink);
+  radio::setLinkBusy([]() { return bleLink.connected(); });
   applyRun();   // a node that rebooted mid-drive keeps scanning
 }
 
+// A Bristle board that no core has spoken to says so once a second on USB, so a program on the
+// other end can tell it from any other ESP32 without writing a byte to the port.
+static void beacon(uint32_t now) {
+  if (!usb || usb->helloSeen || now - lastBeaconMs < bp::BEACON_MS) return;
+  if (consoleQuietUntil && (int32_t)(now - consoleQuietUntil) < 0) return;
+  lastBeaconMs = now;
+  codec::LineOut l(bp::MSG_BCN);
+  l.addRaw("hw", hwHex).add("bd", BRISTLE_BOARD).addu("b", BRISTLE_BUILD).addu("o", st.owned ? 1 : 0).addu("ro", st.role);
+  usb->send(l.finish());
+}
+
 void tick(uint32_t now) {
-  radio::tick(now);
+  if (restartAt && (int32_t)(now - restartAt) >= 0) {
+    q.flush();
+    delay(50);
+    ESP.restart();
+  }
+  if (isBridge()) {
+    if (usb) bridge::tick(now, *usb);
+  } else {
+    // The ESP-NOW visit happens between two scans, before the next one is started.
+    if (espLink.visitDue(now) && radio::canVisit()) espLink.visit(now);
+    bleLink.poll(now);
+    radio::tick(now);
+  }
   q.tick(now);
   streamFinds(now);
+  bool ownerAuthed = false;
   for (int i = 0; i < nLinks; i++) {
     Link& l = *links[i];
+    ownerAuthed |= l.authed;
     if (!l.helloSeen) continue;
     // The core pings an idle link. Silence this long means the cable or the core is gone.
     if (now - l.lastRxMs > bp::LINK_TIMEOUT_MS) {
       bool was = l.authed;
       l.drop();
-      pickActive();
+      linkClosed(l);
       if (was) console::say("core went quiet: link closed, finds are being kept");
       continue;
     }
@@ -359,6 +546,8 @@ void tick(uint32_t now) {
       l.lastTreqMs = now;
     }
   }
+  ota::tick(now, st.owned, ownerAuthed);
+  beacon(now);
   ledTick(now);
   if (owner::bootHeld(now)) forgetEverything("BOOT held");
 }

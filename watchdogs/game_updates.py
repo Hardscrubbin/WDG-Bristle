@@ -34,13 +34,13 @@ import urllib.request
 # The immutable GitHub identity stays valid when the review suffix is removed.
 # The name is a bootstrap label, not authority to fetch another repository.
 # [bristle] This build's repository. It has no online update source (merge_build.notice_only_check
-# answers "Updates: managed manually"), so nothing below is ever asked of GitHub. The two numbers
-# are still the ones of the edition this build started from: put this repository's own numeric
-# ids here before anyone turns updates on.
+# answers "Updates: managed manually"), so nothing below is ever asked of GitHub. The two numeric
+# ids are 0: no repository has id 0, so no online source can ever pass the identity check. Updates
+# stay manual. Put this repository's own ids here only if updates are ever turned on.
 REPOSITORY = "Hardscrubbin/WDG-Bristle"
-REPOSITORY_ID = 1442123109
+REPOSITORY_ID = 0
 OWNER = "Hardscrubbin"
-OWNER_ID = 315514197
+OWNER_ID = 0
 BRANCH = "main"
 CHANNEL = "stable"
 FEED_PATH = "updates/stable.json"

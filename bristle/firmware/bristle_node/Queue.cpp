@@ -126,8 +126,18 @@ void FindQueue::loadState() {
   f.close();
 }
 
+// The ack point moves all the time while a core is listening, and it only saves work after a
+// restart (without it the node would offer a few acked finds again, which the core drops). So it is
+// written at most every QUEUE_STATE_SAVE_MS. A drop counter is never left unsaved that long.
+void FindQueue::saveStateIfDue() {
+  if (!stateDirty_) return;
+  if (countersDirty_ || millis() - lastStateMs_ >= bp::QUEUE_STATE_SAVE_MS) saveState();
+}
+
 void FindQueue::saveState() {
-  stateDirty_ = false;
+  stateDirty_ = countersDirty_ = false;
+  lastStateMs_ = millis();
+  stateSaves_++;
   if (!flashOk_) return;
   File f = LittleFS.open(STATE_PATH, "w");
   if (!f) return;
@@ -235,7 +245,7 @@ void FindQueue::dropRamFront() {
   ram_.erase(ram_.begin());
   if (held_) held_--;
   dropped_++;
-  stateDirty_ = true;
+  stateDirty_ = countersDirty_ = true;
   advancePending_ = true;
 }
 
@@ -302,7 +312,7 @@ void FindQueue::makeRoom() {
     if (ack_ < segs_.front().start) ack_ = segs_.front().start;
     if (ackTarget_ < ack_) ackTarget_ = ack_;
     advancePending_ = true;
-    stateDirty_ = true;
+    stateDirty_ = countersDirty_ = true;
     usedBytes_ = LittleFS.usedBytes();
   }
 }
@@ -312,9 +322,10 @@ void FindQueue::flush() {
   if (!flashOk_) return;
   if (ram_.empty()) {
     usedBytes_ = LittleFS.usedBytes();
-    if (stateDirty_) saveState();
+    saveStateIfDue();
     return;
   }
+  flushes_++;
   makeRoom();
   if (segs_.empty() || forceRotate_ || curSegBytes_ >= bp::QUEUE_SEGMENT_BYTES) rotate();
   Seg& seg = segs_.back();
@@ -340,6 +351,7 @@ void FindQueue::flush() {
   File chk = LittleFS.open(path, "r");
   uint32_t size = chk ? chk.size() : 0;
   if (chk) chk.close();
+  flashedBytes_ += wrote;
   if (size == curSegBytes_ + wrote) {
     seg.count = (uint16_t)(seg.count + ram_.size());
     curSegBytes_ += wrote;
@@ -401,6 +413,7 @@ void FindQueue::advance(int budget) {
         if (lost) {
           dropped_ += lost;
           held_ -= std::min(held_, lost);
+          countersDirty_ = true;
         }
         stateDirty_ = true;
         continue;
@@ -419,6 +432,7 @@ void FindQueue::advance(int budget) {
       if (dead) {
         dropped_++;
         untimed_++;
+        countersDirty_ = true;
       }
       ack_ = r.seq + 1;
       stateDirty_ = true;

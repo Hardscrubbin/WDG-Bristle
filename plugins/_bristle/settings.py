@@ -18,8 +18,11 @@ KEY_BYTES = 16
 DEFAULTS = {
     "region": "U",              # U (US channels) or E (EU channels)
     "ble_adapter": "hci0",      # the ONE Bluetooth adapter reserved for Bristle (Kismet must not use it)
-    "bridge_port": "",          # serial port of the ESP-NOW bridge board (later step)
-    "control_channel": "1",     # ESP-NOW control channel (later step)
+    "ble_link": "on",           # link nodes over Bluetooth LE on that adapter (off: USB and the bridge only)
+    "ble_max_links": "5",       # nodes linked over Bluetooth at once (an adapter carries about 7)
+    "ble_scan": "active",       # active: nodes also ask each device for its scan response (more device
+                                # names). passive: they only listen. Nothing ever connects or pairs
+    "control_channel": "1",     # ESP-NOW control channel, 1-13 (nodes and the bridge are told)
     "repeat_ap_s": "300",       # a node reports the same access point again only after this long
     "repeat_ble_s": "30",       # ... and the same Bluetooth device
     "hud": "on",                # the small activity line on the map
@@ -28,7 +31,57 @@ DEFAULTS = {
     "auto_probe": "off",        # off: a new ESP32 port is listed and you decide. on: say hello by itself
     "exclude_ports": "",        # serial ports Bristle must never touch, comma separated
     "extra_usb_ids": "",        # more USB chips to treat as ESP32 boards: vid:pid,vid:pid (hex)
+    "firmware_dir": "",         # where the node firmware releases are (empty: bristle/firmware/releases here)
+    # ---- nearby alerts: on/off for each kind
+    "alert_follow": "on",       # a device seen again and again at places far apart
+    "alert_tracker": "on",      # AirTag / Tile / SmartTag type trackers
+    "alert_axon": "on",
+    "alert_flock": "on",
+    "alert_pentest": "on",      # other wardriving and pentest devices
+    "alert_rig": "on",          # Bristle boards that are not yours
+    "alert_skimmer": "on",      # a possible skimmer, high score and close by
+    "alert_kismet": "on",       # Kismet's own alerts (the list is kismet_alerts)
+    "alert_sound": "on",
+    # Kismet alerts to show. Take a name out of the list to switch that one off.
+    "kismet_alerts": "DEAUTHFLOOD,BCASTDISCON,DISCONCODEINVALID,DEAUTHCODEINVALID,APSPOOF,BSSTIMESTAMP,"
+                     "CHANCHANGE,ADVCRYPTCHANGE,DOT11KARMA,KARMAOUI,WPSBRUTE,NONCEDEGRADE,NONCEREUSE,AIRJACKSSID,CRYPTODROP",
+    # ---- following: how far apart, within how long, how many places, over at least how long
+    "follow_distance_m": "500",
+    "follow_window_min": "60",
+    "follow_sightings": "3",
+    "follow_min_minutes": "10",
+    "ignore_macs": "",          # your own devices (Piglets, Biscuits, phone): MACs, comma separated
+    # ---- possible skimmers
+    "skimmer_alert_score": "60",    # alert only at this score or more ...
+    "skimmer_alert_rssi": "-70",    # ... and this signal or stronger (close by)
+    "hunt_adapter": "",         # Bluetooth adapter hunt mode may listen with: empty = none (Kismet's and the
+                                # nodes' readings only), or hci0 / hci1. An adapter Kismet uses is borrowed
+                                # for the hunt and given back when it ends.
 }
+
+ALERT_SWITCHES = ("follow", "tracker", "axon", "flock", "pentest", "rig", "skimmer", "kismet")
+
+
+def number(conf: dict, key: str, low: float, high: float) -> float:
+    """A numeric setting, held inside sensible limits; the default if it is not a number."""
+    try:
+        value = float(str(conf.get(key, "")).strip())
+    except ValueError:
+        value = float(DEFAULTS[key])
+    return max(low, min(high, value))
+
+
+def name_list(conf: dict, key: str) -> list:
+    return [item.strip().upper() for item in str(conf.get(key, "")).split(",") if item.strip()]
+
+
+def mac_list(conf: dict, key: str) -> set:
+    out = set()
+    for item in str(conf.get(key, "")).split(","):
+        mac = "".join(c for c in item.lower() if c in "0123456789abcdef")
+        if len(mac) == 12:
+            out.add(mac)
+    return out
 
 
 def _parse(text: str) -> dict:
@@ -117,6 +170,49 @@ def remember(path, key: str, value: str) -> bool:
         return True
     except OSError:
         return False
+
+
+def core_id(folder) -> str:
+    """This install's own id (8 hex), made once and kept with Node Memory. Nodes use it to tell
+    one core from another that holds the same owner key (a second core)."""
+    path = Path(folder) / "core_id"
+    try:
+        value = path.read_text(encoding="ascii").strip().lower()
+        if len(value) == 8 and all(c in "0123456789abcdef" for c in value):
+            return value
+    except (OSError, UnicodeError):
+        pass
+    value = _random.token_hex(4)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _replace_file(path, value + "\n")
+    except OSError:
+        pass                                    # a new one every start is still better than none
+    return value
+
+
+def replace_owner_key(secrets_path, key: bytes) -> None:
+    """Put an imported owner key into secrets.conf. The key that was there stays in the file as
+    BRISTLE_OWNER_KEY_PREVIOUS (so the nodes it owns are never locked out for good), every other
+    line is kept as it is, and the file stays mode 600."""
+    if len(key) != KEY_BYTES:
+        raise ValueError("not an owner key")
+    secrets_path = Path(secrets_path)
+    lines = secrets_path.read_text(encoding="utf-8").splitlines() if secrets_path.exists() else []
+    kept, previous = [], None
+    for raw in lines:
+        name = raw.strip().partition("=")[0].strip()
+        if not raw.strip().startswith("#") and name == KEY_NAME:
+            previous = raw.strip().partition("=")[2].strip()
+            continue
+        if not raw.strip().startswith("#") and name == KEY_NAME + "_PREVIOUS":
+            continue
+        kept.append(raw)
+    if previous and previous.lower() != key.hex():
+        kept.append("# The owner key this install used before an import. Nodes it adopted still need it.")
+        kept.append("%s_PREVIOUS=%s" % (KEY_NAME, previous))
+    kept.append("%s=%s" % (KEY_NAME, key.hex()))
+    _replace_file(secrets_path, "\n".join(kept) + "\n", mode=0o600)
 
 
 def _key_from_text(text: str):

@@ -6,6 +6,7 @@ import hashlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -203,6 +204,25 @@ class PublicCheck(unittest.TestCase):
         found = self.hits(words=None)
         self.assertEqual(len(found), public_check.BINARY_SHOWN + 1)
         self.assertTrue(found[-1].endswith("... and 4 more"), found[-1])
+
+    def test_four_original_icons_are_excused_by_hash_and_only_while_unchanged(self):
+        words = public_check.Words(cased=["Marker"])
+        marked = b"\x89PNG....Created by Some Marker tool.....IEND"
+        rel = "assets/scan.png"
+        self.assertTrue(public_check.check_binary(rel, marked, words))             # same path, other bytes
+        with patch.dict(public_check.EXCUSED_BINARIES, {rel: hashlib.sha256(marked).hexdigest()}):
+            self.assertEqual(public_check.check_binary(rel, marked, words), [])    # the exact file
+            self.assertTrue(public_check.check_binary(rel, marked + b" ", words))  # changed by one byte
+            self.assertTrue(public_check.check_binary("assets/other.png", marked, words))   # another path
+            leak = marked + b" /home/someone/icons/scan.png "
+            with patch.dict(public_check.EXCUSED_BINARIES, {rel: hashlib.sha256(leak).hexdigest()}):
+                self.assertEqual(len(public_check.check_binary(rel, leak, words)), 1)   # a machine path still counts
+        self.assertEqual(sorted(public_check.EXCUSED_BINARIES),
+                         ["assets/addons.png", "assets/attack.png", "assets/scan.png", "assets/sniff.png"])
+        for name, digest in public_check.EXCUSED_BINARIES.items():
+            path = ROOT / name
+            if path.is_file():
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest, name)
 
     @unittest.skipUnless(REAL_LIST.is_file(), "the word list is not part of this tree")
     def test_the_real_word_list_reads_and_the_tool_and_this_test_pass_it(self):

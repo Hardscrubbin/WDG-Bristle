@@ -8,8 +8,12 @@
 #include "Clock.h"
 #include "Codec.h"
 #include "Crypto.h"
+#include "Bridge.h"
+#include "Link_Ble.h"
+#include "Link_EspNow.h"
 #include "Link_Usb.h"
 #include "Node.h"
+#include "Ota.h"
 #include "Owner.h"
 #include "Radio.h"
 
@@ -58,11 +62,11 @@ void banner() {
       (layoutOk(app, fs) ? "" : ", WARNING: wrong flash layout (type status)"));
 }
 
-bool selftest() {
+bool selftest(bool quiet) {
   bool ok = true;
   auto check = [&](const char* what, const String& got, const char* want) {
     bool pass = got == want;
-    say(String(pass ? "PASS " : "FAIL ") + what + " got " + got + (pass ? "" : String(" want ") + want));
+    if (!quiet || !pass) say(String(pass ? "PASS " : "FAIL ") + what + " got " + got + (pass ? "" : String(" want ") + want));
     ok &= pass;
   };
   {
@@ -102,6 +106,30 @@ bool selftest() {
     size_t n = crypto::frameBuild(key, bp::VEC_FRAME_0_KIND, bp::VEC_FRAME_0_CTR, bp::VEC_FRAME_0_FRAG,
                                   (const uint8_t*)pl, strlen(pl), fr, sizeof(fr));
     check("frame", crypto::toHex(fr, n), bp::VEC_FRAME_0_EXPECT);
+    n = crypto::frameBuild(key, bp::VEC_FRAME_1_KIND, bp::VEC_FRAME_1_CTR, bp::VEC_FRAME_1_FRAG, nullptr, 0, fr, sizeof(fr));
+    check("frame_poll", crypto::toHex(fr, n), bp::VEC_FRAME_1_EXPECT);
+    pl = bp::VEC_FRAME_2_PAYLOAD;
+    n = crypto::frameBuild(key, bp::VEC_FRAME_2_KIND, bp::VEC_FRAME_2_CTR, bp::VEC_FRAME_2_FRAG,
+                           (const uint8_t*)pl, strlen(pl), fr, sizeof(fr));
+    check("frame_piece", crypto::toHex(fr, n), bp::VEC_FRAME_2_EXPECT);
+    // ... and the way in: the tag is checked, and one changed bit is refused
+    uint8_t kind, frag;
+    uint32_t ctr;
+    const uint8_t* payload;
+    size_t plen;
+    bool opened = crypto::frameOpen(key, fr, n, kind, ctr, frag, payload, plen);
+    check("frame_open", opened ? String(ctr) + "/" + String(frag) + "/" + String((unsigned)plen) : String("refused"),
+          (String(bp::VEC_FRAME_2_CTR) + "/" + String(bp::VEC_FRAME_2_FRAG) + "/" + String((unsigned)strlen(pl))).c_str());
+    fr[11] ^= 1;
+    check("frame_tamper", crypto::frameOpen(key, fr, n, kind, ctr, frag, payload, plen) ? "accepted" : "refused", "refused");
+  }
+  {   // base64url, as used for relayed frames and firmware chunks
+    const uint8_t raw[] = {0xFB, 0xFF, 0x00, 0x10, 0x83};
+    String text = codec::b64urlEncode(raw, sizeof(raw));
+    uint8_t back[8];
+    size_t n = 0;
+    bool decoded = codec::b64urlDecode(text, back, sizeof(back), n);
+    check("base64url", decoded && n == sizeof(raw) && memcmp(raw, back, n) == 0 ? text : String("mismatch"), "-_8AEIM");
   }
   {   // codec round trip through the parser
     codec::LineOut l(bp::MSG_AP);
@@ -112,7 +140,7 @@ bool selftest() {
     const String* e = m.get("e");
     check("roundtrip", parsed && e ? *e : String("parse-error"), "Caf\xC3\xA9 ,=*:%");
   }
-  say(ok ? "SELFTEST PASS" : "SELFTEST FAIL");
+  if (!quiet || !ok) say(ok ? "SELFTEST PASS" : "SELFTEST FAIL");
   return ok;
 }
 
@@ -128,8 +156,9 @@ void run(const String& raw) {
   cmd.trim();
   const NodeState& st = node::state();
   FindQueue& q = node::queue();
+  if (cmd.length()) node::consoleUsed();
   if (cmd == "help") {
-    say("commands: status, queue, owner, forget, identify <s>, boot, selftest, version");
+    say("commands: status, queue, links, update, owner, forget, identify <s>, boot, selftest, version");
   } else if (cmd == "status") {
     Link* link = node::activeLink();
     String plan = node::planText();
@@ -141,6 +170,24 @@ void run(const String& raw) {
     say(layoutText());
     say("bad lines in " + String(node::badLines()) + ", lines not sent (port full) " + String(usbLink.unsent()) +
         ", free RAM " + String(ESP.getFreeHeap() / 1024) + " KB");
+    say(String("role ") + (node::isBridge() ? "bridge" : "node") + ", firmware update: " + ota::statusText());
+  } else if (cmd == "links") {
+    if (node::isBridge()) {
+      bridge::Stats s = bridge::stats();
+      say("bridge on ESP-NOW channel " + String(st.channel) + ": frames in " + String(s.rx) + ", out " + String(s.tx) +
+          ", failed " + String(s.txFailed) + ", held for nodes " + String(s.held) + ", mail dropped " + String(s.dropped));
+    } else {
+      uint32_t now = millis();
+      say(String("ESP-NOW: ") + (st.channel ? "channel " + String(st.channel) : String("off")) +
+          (espLink.enabled() ? "" : (st.owned ? " (resting: USB is the link)" : " (no owner: nothing is sent)")) +
+          ", bridge " + (espLink.bridgeKnown(now) ? "heard" : "not heard") + ", visits " + String(espLink.visits()) +
+          ", last visit took " + String(espLink.lastVisitMs()) + " ms, old frames refused " +
+          String(espLink.staleFrames()) + ", frames not mine " + String(espLink.badFrames()));
+      say(String("Bluetooth link: ") + (bleLink.connected() ? "a core is connected" : "advertising or resting") +
+          ", lines not sent " + String(bleLink.unsent()) + ", adverts missed " + String(radio::bleLost()));
+    }
+  } else if (cmd == "update") {
+    say(ota::statusText());
   } else if (cmd == "queue") {
     say("holding " + String(q.backlog()) + " finds, next seq " + String(q.nextSeq()) + ", oldest held " +
         String(q.ackSeq()));
@@ -148,6 +195,8 @@ void run(const String& raw) {
     say(String("flash ") + (q.flashOk() ? "" : "UNAVAILABLE ") + String(q.usedBytes() / 1024) + " of " +
         String(q.capacityBytes() / 1024) + " KB used (" + String(q.fillPct()) + "%), " + String(q.segments()) +
         " segment file(s)");
+    say("since this boot: finds written to flash " + String(q.flushes()) + " times (" + String(q.flashedBytes() / 1024) +
+        " KB), state file written " + String(q.stateSaves()) + " times");
   } else if (cmd == "owner") {
     say(st.owned ? "owner " + owner::id() : String("no owner"));
   } else if (cmd == "forget") {

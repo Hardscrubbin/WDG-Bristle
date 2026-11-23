@@ -23,7 +23,7 @@ class UsbLink : public Link {
   static constexpr size_t RX_BUFFER_BYTES = 1024;
 
  private:
-  char buf_[bp::LINE_MAX_BYTES + 2];
+  char buf_[bp::LINE_RELAY_MAX_BYTES + 2];           // a bridge takes ETX lines, which are longer
   size_t len_ = 0;
   bool overflow_ = false;
   uint32_t unsent_ = 0;

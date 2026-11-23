@@ -95,13 +95,26 @@ def body(msg_type: str, fields: dict[str, object] | None = None) -> str:
     return f"{msg_type}:{','.join(parts)}"
 
 
-def build(msg_type: str, fields: dict[str, object] | None = None) -> str:
-    """A full line, with CRC and trailing newline."""
-    b = body(msg_type, fields)
+def seal(b: str, limit: int | None = None) -> str:
+    """A body (TYPE:k=v,...) -> the full line, with CRC and trailing newline."""
+    limit = limit or proto.LINE_MAX_BYTES
     line = f"{b}*{crc16(b.encode('ascii')):04X}\n"
-    if len(line.encode("ascii")) > proto.LINE_MAX_BYTES:
-        raise LineError(f"line too long ({len(line)} > {proto.LINE_MAX_BYTES})")
+    if len(line.encode("ascii")) > limit:
+        raise LineError(f"line too long ({len(line)} > {limit})")
     return line
+
+
+def build(msg_type: str, fields: dict[str, object] | None = None, limit: int | None = None) -> str:
+    """A full line, with CRC and trailing newline. ``limit``: the longest line allowed (the relay
+    lines between core and bridge may be longer than every other line)."""
+    return seal(body(msg_type, fields), limit)
+
+
+def strip_crc(line: str) -> str:
+    """A full line -> its body (what travels inside a signed ESP-NOW frame)."""
+    line = line.rstrip("\r\n")
+    star = line.rfind("*")
+    return line[:star] if star >= 0 and len(line) - star == 5 else line
 
 
 def parse_body(text: str) -> Message:
@@ -126,7 +139,7 @@ def parse_body(text: str) -> Message:
     return Message(msg_type, fields)
 
 
-def parse(line: str | bytes) -> Message:
+def parse(line: str | bytes, limit: int | None = None) -> Message:
     """Parse one full line (with or without the trailing newline). Raises LineError."""
     if isinstance(line, bytes):
         try:
@@ -134,7 +147,7 @@ def parse(line: str | bytes) -> Message:
         except UnicodeDecodeError as exc:
             raise LineError("non-ASCII line") from exc
     line = line.rstrip("\r\n")
-    if len(line) + 1 > proto.LINE_MAX_BYTES:
+    if len(line) + 1 > (limit or proto.LINE_MAX_BYTES):
         raise LineError("line too long")
     star = line.rfind("*")
     if star < 0 or len(line) - star != 5:

@@ -9,8 +9,10 @@ uConsole.
 artwork and most of what you see are LOCOSP's work, under LOCOSP's [LICENSE](LICENSE) (MIT). This
 repository is a fork of it. Other credits are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-> **Status.** Early. The Bristle Nodes firmware and its integration into the game are new and are
-> being bench-tested on real boards: expect rough edges, and do not rely on them yet.
+> **Status.** WDG-Bristle 1.1. Early. The Bristle Nodes firmware and everything it adds to the game
+> have been compiled and unit-tested, and have **not yet run on real boards**: the bench list in
+> [`bristle/docs/BENCH_TESTS.md`](bristle/docs/BENCH_TESTS.md) is still to be worked through. Expect
+> rough edges, and do not rely on them yet.
 
 ## What it does
 
@@ -27,10 +29,23 @@ The full list, with what's new in WDG-Bristle and where everything comes from, i
 - **Hardware Check.** One screen for the board, power, the add-on board's rails, GPS, SDR, Wi-Fi
   and Bluetooth adapters.
 - **Loot backup and restore**, a session log, WDGWars pairing and status, an offline basemap layer.
-- **Bristle Nodes.** ESP32-C5 boards on a powered USB hub scan Wi-Fi (2.4 and 5 GHz) and Bluetooth
-  on the channels the uConsole gives them. Each board is adopted by hand, locked to its owner with
-  a key, and keeps its finds in flash until the uConsole confirms them. The uConsole places every
-  find with its own GPS. Protocol, firmware and tools are in [`bristle/`](bristle/).
+- **Bristle Nodes.** ESP32-C5 boards scan Wi-Fi (2.4 and 5 GHz) and Bluetooth on the channels the
+  uConsole gives them. Each board is adopted by hand, locked to its owner with a key, and keeps its
+  finds in flash until the uConsole confirms them. The uConsole places every find with its own GPS.
+  Three links, one protocol: USB on a powered hub, ESP-NOW through one board acting as a bridge
+  (signed frames; the way to tens of nodes), and Bluetooth LE. Firmware updates go over any of the
+  three and roll back by themselves if the new image does not come up. Protocol, firmware and tools
+  are in [`bristle/`](bristle/).
+- **Nearby alerts.** A popup, a sound and a log line when the radios hear a device from a
+  user-editable signatures file (trackers, some makers' devices, other rigs), or one that keeps
+  turning up at places far apart. Kismet's own alerts are shown the same way. Every value in the
+  signatures file names its published source: [`bristle/docs/SIGNATURES.md`](bristle/docs/SIGNATURES.md).
+- **Possible skimmers, listening only.** Bluetooth serial modules that look factory-fresh (the
+  signs found on card skimmers pulled out of gas pumps) are scored, logged with a position, and can
+  be walked up to with a signal meter. Such a device is never connected to, paired with or asked
+  for anything. It finds some
+  skimmers and misses others (a renamed module, a cellular one, one with no radio): a hit is a
+  possible skimmer, and no hit never means a pump is safe.
 
 ## Hardware
 
@@ -65,14 +80,18 @@ There is no in-game updater in this build: update with `git pull` and `./install
 
 ### Bristle Nodes
 
-1. Flash the boards: [`bristle/docs/FLASHING.md`](bristle/docs/FLASHING.md). Images are in
-   `bristle/firmware/releases/`.
-2. Plug them into a powered USB hub on the uConsole.
-3. In the game: **PLUGINS > Bristle: Nodes**. A new board is listed and left alone until you press
-   **A**. Adopt it, then press **S** to scan.
+1. Plug a board into a powered USB hub on the uConsole. In the game: **PLUGINS > Bristle: Nodes**.
+   A blank board can be flashed from that screen (**W**); or flash it from a PC first:
+   [`bristle/docs/FLASHING.md`](bristle/docs/FLASHING.md). Images are in `bristle/firmware/releases/`.
+2. A Bristle board announces itself and is listed. Any other serial device is left alone: nothing
+   is written to a port to find out what is on it.
+3. Press **A** to adopt it, then **S** to scan.
 
-The protocol is described in [`bristle/docs/PROTOCOL.md`](bristle/docs/PROTOCOL.md); the bench
-steps the firmware is being tested against are in [`bristle/docs/BENCH_TESTS.md`](bristle/docs/BENCH_TESTS.md).
+The uConsole side is described in [`bristle/docs/INSTALL.md`](bristle/docs/INSTALL.md), hardware
+and power in [`bristle/docs/HARDWARE.md`](bristle/docs/HARDWARE.md), the protocol in
+[`bristle/docs/PROTOCOL.md`](bristle/docs/PROTOCOL.md). The bench steps the firmware is to be
+tested against are in [`bristle/docs/BENCH_TESTS.md`](bristle/docs/BENCH_TESTS.md). What it would
+take to move Bristle to another game base: [docs/PORTING_NG.md](docs/PORTING_NG.md).
 
 ## Not in this repository
 
@@ -98,6 +117,10 @@ python3 -B tools/public_check.py
 - **The additions in this repository** (Bristle Nodes, the Kismet bridge and the WDG-Bristle
   changes) are MIT, Copyright (c) 2026 Hardscrubbin: [LICENSE-HARDSCRUBBIN](LICENSE-HARDSCRUBBIN).
   The same text is in [bristle/LICENSE](bristle/LICENSE).
+- **`plugins/_ng/`** holds LOCOSP's WDGoNG files, unchanged, under the PolyForm Noncommercial
+  licence: the notice and the licence text are in that folder
+  ([NOTICE](plugins/_ng/NOTICE), [LICENSE-WDGoNG.txt](plugins/_ng/LICENSE-WDGoNG.txt)). The MIT
+  licences above do not cover those files.
 - **Third-party parts** (fonts, map data, installed packages, and what is compiled into the node
   firmware images) keep their own licences. They are listed in
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and

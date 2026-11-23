@@ -21,7 +21,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .esp32_flash import FlashError
 
 
-REPOSITORY_ID = 1442123109
+REPOSITORY_ID = 0   # [bristle] no online firmware source: 0 matches no repository
 REPOSITORY = "Hardscrubbin/WDG-Bristle"   # [bristle] never asked: firmware comes from the bundled image only
 REPO_URL = f"https://api.github.com/repositories/{REPOSITORY_ID}"
 API_PREFIX = f"https://api.github.com/repos/{REPOSITORY}"

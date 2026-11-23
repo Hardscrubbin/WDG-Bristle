@@ -57,10 +57,12 @@ def gen_python(spec: dict) -> str:
     L = [f'"""{HEADER_NOTE}"""', "# fmt: off", ""]
     L += [f'PRODUCT_NAME = {p["name"]!r}', f'NAME_PREFIX = {p["prefix"]!r}',
           f'PROTOCOL_VERSION = {p["protocol_version"]}', ""]
-    L += [f'LINE_MAX_BYTES = {spec["line"]["max_bytes"]}', ""]
+    L += [f'LINE_MAX_BYTES = {spec["line"]["max_bytes"]}',
+          f'LINE_RELAY_MAX_BYTES = {spec["line"]["relay_max_bytes"]}', ""]
     L += [f'FRAME_MAGIC = {f["magic"]!r}', f'FRAME_HEADER_BYTES = {f["header_bytes"]}',
           f'FRAME_TAG_BYTES = {f["tag_bytes"]}', f'FRAME_MAX_BYTES = {f["max_bytes"]}',
-          f'FRAME_HMAC_LABEL = {f["hmac_label"]!r}']
+          f'FRAME_HMAC_LABEL = {f["hmac_label"]!r}', f'FRAME_COUNTER_BLOCK = {f["counter_block"]}',
+          f'FRAME_MAX_FRAGMENTS = {f["max_fragments"]}']
     for k, v in f["kinds"].items():
         L.append(f"FRAME_KIND_{const_name(k)} = {v}")
     L.append("")
@@ -86,6 +88,8 @@ def gen_python(spec: dict) -> str:
         L.append(f"HB_{const_name(k)} = {v}")
     for k, v in spec["run_mask"].items():
         L.append(f"RUN_{const_name(k)} = {v}")
+    for k, v in spec["roles"].items():
+        L.append(f"ROLE_{const_name(k)} = {v}")
     L.append("")
     for k, v in t.items():
         L.append(f"{const_name(k)} = {v}")
@@ -94,7 +98,9 @@ def gen_python(spec: dict) -> str:
     L.append(f'USB_BAUD = {spec["usb"]["baud"]}')
     b = spec["ble"]
     L += [f'BLE_SERVICE_UUID = {b["service_uuid"]!r}', f'BLE_COMMAND_UUID = {b["command_uuid"]!r}',
-          f'BLE_NOTIFY_UUID = {b["notify_uuid"]!r}', f'BLE_MTU = {b["mtu"]}', ""]
+          f'BLE_NOTIFY_UUID = {b["notify_uuid"]!r}', f'BLE_MTU = {b["mtu"]}',
+          f'BLE_ADV_FLAG_OWNED = {b["adv_flag_owned"]}', f'BLE_MAX_LINKS = {b["max_links"]}',
+          f'OTA_CHUNK_BYTES = {spec["ota"]["chunk_bytes"]}', f'OTA_WINDOW = {spec["ota"]["window"]}', ""]
     msgs = {k: {"dir": v["dir"], "req": list(v.get("req", [])), "opt": list(v.get("opt", []))}
             for k, v in spec["messages"].items()}
     L.append(f"MESSAGES = {json.dumps(msgs)}")
@@ -111,12 +117,15 @@ def gen_header(spec: dict, vectors: dict) -> str:
     L += [f'constexpr const char* PRODUCT_NAME = "{p["name"]}";',
           f'constexpr const char* NAME_PREFIX = "{p["prefix"]}";',
           f'constexpr uint8_t PROTOCOL_VERSION = {p["protocol_version"]};',
-          f'constexpr uint16_t LINE_MAX_BYTES = {spec["line"]["max_bytes"]};', ""]
+          f'constexpr uint16_t LINE_MAX_BYTES = {spec["line"]["max_bytes"]};',
+          f'constexpr uint16_t LINE_RELAY_MAX_BYTES = {spec["line"]["relay_max_bytes"]};', ""]
     L += [f'constexpr char FRAME_MAGIC0 = \'{f["magic"][0]}\';', f'constexpr char FRAME_MAGIC1 = \'{f["magic"][1]}\';',
           f'constexpr uint8_t FRAME_HEADER_BYTES = {f["header_bytes"]};',
           f'constexpr uint8_t FRAME_TAG_BYTES = {f["tag_bytes"]};',
           f'constexpr uint8_t FRAME_MAX_BYTES = {f["max_bytes"]};',
-          f'constexpr const char* FRAME_HMAC_LABEL = "{f["hmac_label"]}";']
+          f'constexpr const char* FRAME_HMAC_LABEL = "{f["hmac_label"]}";',
+          f'constexpr uint32_t FRAME_COUNTER_BLOCK = {f["counter_block"]};',
+          f'constexpr uint8_t FRAME_MAX_FRAGMENTS = {f["max_fragments"]};']
     for k, v in f["kinds"].items():
         L.append(f"constexpr uint8_t FRAME_KIND_{const_name(k)} = {v};")
     L.append("")
@@ -151,6 +160,8 @@ def gen_header(spec: dict, vectors: dict) -> str:
         L.append(f"constexpr uint16_t HB_{const_name(k)} = {v};")
     for k, v in spec["run_mask"].items():
         L.append(f"constexpr uint8_t RUN_{const_name(k)} = {v};")
+    for k, v in spec["roles"].items():
+        L.append(f"constexpr uint8_t ROLE_{const_name(k)} = {v};")
     L.append("")
     for k, v in t.items():
         L.append(f"constexpr uint32_t {const_name(k)} = {v};")
@@ -161,7 +172,9 @@ def gen_header(spec: dict, vectors: dict) -> str:
     L += [f'constexpr const char* BLE_SERVICE_UUID = "{b["service_uuid"]}";',
           f'constexpr const char* BLE_COMMAND_UUID = "{b["command_uuid"]}";',
           f'constexpr const char* BLE_NOTIFY_UUID = "{b["notify_uuid"]}";',
-          f'constexpr uint16_t BLE_MTU = {b["mtu"]};', ""]
+          f'constexpr uint16_t BLE_MTU = {b["mtu"]};',
+          f'constexpr uint8_t BLE_ADV_FLAG_OWNED = {b["adv_flag_owned"]};',
+          f'constexpr uint16_t OTA_CHUNK_BYTES = {spec["ota"]["chunk_bytes"]};', ""]
     for k in spec["messages"]:
         L.append(f'constexpr const char* MSG_{k} = "{k}";')
     L.append("")

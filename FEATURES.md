@@ -4,8 +4,8 @@ What WDG-Bristle adds on top of [Watch Dogs Go](https://github.com/LOCOSP/WatchD
 each part comes from.
 
 **Status labels**
-- **1.0**: in this repository now.
-- **1.1**: built and coming in the next release.
+- **1.0**: since the first release.
+- **1.1**: new in 1.1, the current release.
 
 Everything marked Bristle is new and still being bench-tested on real hardware, so expect rough
 edges.
@@ -30,7 +30,7 @@ car, or 40+: the design scales.
 | **Nothing lost, nothing doubled** | Finds are numbered, kept in flash on the node until the uConsole confirms them, and resent after a dropout or reboot. Duplicates are dropped. When flash fills, the oldest finds go first and are counted. | 1.0 |
 | **Placed with the uConsole's GPS** | Nodes need no GPS. Each find is placed by its timestamp against the uConsole's GPS track. A find with no fix near its time is counted, never written at a guessed spot. Never 0,0. | 1.0 |
 | **GPS track kept across restarts** | Finds a node made while the game was restarting can still be placed. | 1.1 |
-| **Three ways to connect** | USB on a powered hub (1.0). ESP-NOW through one bridge board, for range and 40+ nodes (1.1). Bluetooth LE for a node placed away from the uConsole (1.1). | 1.0 / 1.1 |
+| **Three ways to connect** | USB on a powered hub (1.0). ESP-NOW through one bridge board, for range and 40+ nodes (1.1). Bluetooth LE for a node placed away from the uConsole, with the link limit shown (1.1). | 1.0 / 1.1 |
 | **Signed ESP-NOW frames** | Every frame carries an HMAC tag and a replay counter that survives reboots. A node spends roughly 1–4% of its scan time talking. That figure is calculated, not yet measured. | 1.1 |
 | **Over-the-air updates with rollback** | Update a node over USB, ESP-NOW or Bluetooth. The image is checked with SHA-256 and kept only if it passes its self-test and checks in with its owner. Otherwise the node goes back to the old firmware. | 1.1 |
 | **Flash new boards from the uConsole** | Plug a blank board in and the game flashes it, with a full erase the first time. | 1.1 |
@@ -44,7 +44,7 @@ car, or 40+: the design scales.
 | Feature | What it does | Status |
 |---|---|---|
 | **Following detection** | Flags a Bluetooth or Wi-Fi device seen again and again at different places over time. Your own nodes and an ignore list are left out. You set the thresholds. | 1.1 |
-| **Signature alerts** | Recognises Axon body cameras, Flock Safety cameras, common item trackers, wardriving and pentest gear, and other Bristle rigs. Every signature value comes from a published source, recorded beside it (listed in `bristle/docs/SIGNATURES.md` from 1.1). | 1.1 |
+| **Signature alerts** | Recognises Axon body cameras, Flock Safety cameras, common item trackers, wardriving and pentest gear, and other Bristle rigs. Every signature value comes from a published source, recorded beside it in [`SIGNATURES.md`](bristle/docs/SIGNATURES.md). | 1.1 |
 | **Kismet's own defensive alerts** | Deauth floods, access points copying another network's name, and similar, shown through the same alert system. | 1.1 |
 | **Popup, sound, HUD line and a per-drive log** | Each alert type has its own switch, and repeats are rate-limited. | 1.1 |
 

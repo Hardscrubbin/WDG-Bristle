@@ -48,6 +48,11 @@ class FindQueue {
   uint32_t usedBytes() const { return usedBytes_; }
   uint8_t fillPct() const;
   size_t segments() const { return segs_.size(); }
+  // Flash wear, since this boot: how often finds were written, how many bytes, how often the small
+  // state file (ack point, drop counters) was written.
+  uint32_t flushes() const { return flushes_; }
+  uint32_t flashedBytes() const { return flashedBytes_; }
+  uint32_t stateSaves() const { return stateSaves_; }
 
  private:
   struct Seg {
@@ -66,6 +71,7 @@ class FindQueue {
   void closeReaderFile();
   void loadState();
   void saveState();
+  void saveStateIfDue();
   int indexOf(uint32_t start) const;
 
   bool flashOk_ = false;
@@ -80,7 +86,9 @@ class FindQueue {
   uint32_t headPos_ = 0;                              // file offset of the first held record in segs_[0]
   uint16_t headDone_ = 0;                             // records of segs_[0] before headPos_
   bool advancePending_ = false, stateDirty_ = false, forceRotate_ = false;
-  uint32_t lastFlushMs_ = 0;
+  bool countersDirty_ = false;                        // a drop was counted: save the state at the next chance
+  uint32_t lastFlushMs_ = 0, lastStateMs_ = 0;
+  uint32_t flushes_ = 0, flashedBytes_ = 0, stateSaves_ = 0;
   uint32_t totalBytes_ = 0, usedBytes_ = 0;
   // delivery reader
   bool rdOpen_ = false, rdValid_ = false;
