@@ -66,7 +66,8 @@ class SplitTests(unittest.TestCase):
         for sources, fragment in (
                 ([source("a", CH_24 + CH_5)], "one Wi-Fi adapter"),
                 ([source("a", CH_24), source("b", CH_24, running=False)], "one Wi-Fi adapter"),
-                ([source("a", CH_24), source("b", CH_24), source("c", CH_5)], "3 Wi-Fi adapters"),
+                # [bristle] 1.2: three adapters are split now (tests/test_bristle_kismet_cards.py);
+                # until 1.1 this case read "3 Wi-Fi adapters capturing: left to Kismet's own hopping"
                 ([source("a", CH_24), source("b", CH_24)], "do not allow"),
                 ([source("a", CH_5), source("b", CH_5 + CH_6)], "do not allow"),
                 ([source("a", []), source("b", CH_24)], "not reported"),

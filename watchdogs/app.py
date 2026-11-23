@@ -667,7 +667,7 @@ class WatchDogsGame:
 
         # Firmware version tracking
         self._fw_version: str = ""          # detected from ESP32
-        self._fw_remote_version: str = ""   # legacy updater state; disabled in upstream
+        self._fw_remote_version: str = ""   # legacy updater state; not used in this build
         self._fw_update_available = False
         self._fw_generation = 0
         self._fw_package = None
@@ -687,7 +687,7 @@ class WatchDogsGame:
         self._flash_fw_deadline = None
         self._flash_status = ""
 
-        # Own-fork release checks never pull code merely by opening the screen.
+        # This build's release checks never pull code merely by opening the screen.
         self._init_game_updates()
 
         # MeshCore Messenger (runs in background when LoRa enabled)
@@ -1447,7 +1447,7 @@ class WatchDogsGame:
         # [merge-v3] __version__ stays numeric (0.9.21.3) for update compares;
         # the build tag is display-only.
         from watchdogs import merge_build  # [merge-v3] local: see watchdogs/merge_build.py
-        self._term_add(f"[SYS] {merge_build.display_version(__version__)}", raw=True)  # [bristle] "WDG-Bristle 1.1 (base ...)"
+        self._term_add(f"[SYS] {merge_build.display_version(__version__)}", raw=True)  # [bristle] "WDG-Bristle 1.2 (base ...)"
         self._term_add("[SYS] TAB=menu  SPACE=hack  =/]=zoom+  -/[=zoom-", raw=True)
         if self._esp32:
             self._term_add(f"[OK] ESP32 connected on {port}", raw=True)
@@ -1539,7 +1539,7 @@ class WatchDogsGame:
         # ── Subtitle ──
         sub_y = logo_bottom + 8
         _author = "by LOCOSP"
-        _modified = "WDG-Bristle 1.1"  # [bristle] the app's name and version
+        _modified = "WDG-Bristle 1.2"  # [bristle] the app's name and version
         _font = getattr(self, "_font", None)
         _author_w = _font.text_width(_author) if _font is not None else len(_author) * 4
         _modified_w = _font.text_width(_modified) if _font is not None else len(_modified) * 4
@@ -1707,7 +1707,7 @@ class WatchDogsGame:
                 access_lock.release()
 
     def _check_fw_update(self) -> None:
-        """Automatically discover published firmware from the upstream fork."""
+        """Look up the firmware package this build installs (its own source, never the stock one)."""
         from .config import FIRMWARE_RELEASE_URL, UPSTREAM_FIRMWARE_ENABLED
         if not UPSTREAM_FIRMWARE_ENABLED:
             if getattr(self, "_shutting_down", False):
@@ -2050,7 +2050,13 @@ class WatchDogsGame:
         self._breath = (self._breath + 1) % 120
 
         # Camera follows player
-        self.proj.smooth_move(self.player_lat, self.player_lon)
+        # [bristle] ...unless a plugin holds the map on a spot ("open a suspect on the map":
+        # plugins/_bristle/host.py sets and clears _map_focus). The player is not moved.
+        _map_focus = getattr(self, "_map_focus", None)
+        if _map_focus:
+            self.proj.smooth_move(_map_focus[0], _map_focus[1])
+        else:
+            self.proj.smooth_move(self.player_lat, self.player_lon)
         self.proj.update()
 
         self.scan_pulse = (self.scan_pulse + 1) % 60
@@ -5986,6 +5992,10 @@ class WatchDogsGame:
             if (not self._flash_running and not getattr(self, "_fw_checking", False)
                     and getattr(self, "_fw_package", None) is None):
                 threading.Thread(target=self._check_fw_update, daemon=True).start()
+            # [bristle] is there an install on disk that did not finish? (worker thread)
+            _scan = getattr(self, "_fwnote_scan", None)
+            if _scan is not None and not self._flash_running:
+                _scan(getattr(self, "_fw_version", "") or None)
             return
         self._flash_boards = list(FLASH_BOARDS)
         self._flash_sel = min(getattr(self, "_flash_sel", 0), len(self._flash_boards) - 1)
@@ -6018,6 +6028,32 @@ class WatchDogsGame:
                         self._c5_migration_confirm = False
                         self._flash_status = str(exc)
                         self._term_add(f"[FW] {exc}", raw=True)
+                return
+            # [bristle] the page about an install that did not finish (F opens it)
+            if getattr(self, "_c5_pending_page", False):
+                _pending = getattr(self, "_c5_pending", None)
+                if pyxel.btnp(pyxel.KEY_ESCAPE) or pyxel.btnp(pyxel.KEY_N) or _pending is None:
+                    self._c5_pending_page = False
+                    self._esc_consumed_frame = pyxel.frame_count
+                elif pyxel.btnp(pyxel.KEY_Y) and _pending.resumable and not self._flash_running:
+                    self._c5_pending_page = False
+                    if getattr(self, "_fw_package", None) is None or getattr(self, "_fw_error", ""):
+                        self._flash_status = "Press R to check the approved C5 package first, then F again"
+                    elif getattr(self, "_c5_esptool_error", ""):
+                        self._flash_status = "Press P to repair esptool in the game Python first, then F again"
+                    else:
+                        self._fw_migration_authorization = None
+                        self._fw_resume = _pending
+                        self._term_add("[FW] Finishing the interrupted write: the same approved image, "
+                                       "application only, after the read-only checks of the board", raw=True)
+                        self._c5_start_flash_job()
+                return
+            if (getattr(self, "_c5_pending", None) is not None and not self._flash_running
+                    and pyxel.btnp(pyxel.KEY_F)):
+                self._c5_pending_page = True
+                _steps = getattr(self, "_fwnote_steps", None)
+                if _steps is not None:
+                    _steps()
                 return
             if pyxel.btnp(pyxel.KEY_ESCAPE):
                 self._flash_screen = False
@@ -6156,6 +6192,69 @@ class WatchDogsGame:
             raise FlashError("Recovery helper is missing or unreadable beside the running app.py")
         return helper
 
+    # -- [bristle] an interrupted C5/SOLO write: the logic is in watchdogs/c5_resume.py -----------
+    def _fwnote_journal(self, state, package=None, identity=None):
+        """Flash worker thread: note on disk how far the write got. A migration's note goes next
+        to its device backup; an ordinary install has no backup and gets a folder of its own.
+        Never raises: the write does not depend on the note."""
+        try:
+            from . import c5_resume
+            resume = getattr(self, "_fw_resume", None)
+            directory = (getattr(self, "_fw_journal_directory", None)
+                         or (resume.directory if resume is not None else None)
+                         or getattr(self, "_fw_backup_directory", None))
+            if not directory:
+                directory = (Path(self._app_dir) / "firmware_cache" / c5_resume.legacy_names.RECOVERY_DIR
+                             / c5_resume.INSTALL_FOLDER)
+                directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+            self._fw_journal_directory = directory
+            if not c5_resume.record(directory, state, package, identity):
+                self._c5_flash_log("[RECOVERY] This step could not be noted on disk. If the write is cut "
+                                   "off, the Firmware screen will not be able to offer to finish it.")
+        except Exception as exc:
+            self._c5_flash_log(f"[RECOVERY] Write note failed: {exc}")
+
+    def _fwnote_scan(self, answered=None):
+        """Look on disk for a firmware install that did not finish (a few small files), on a worker
+        thread. ``answered``: a version the board has just reported, which settles an open note."""
+        def work():
+            try:
+                from . import c5_resume
+                cache = Path(self._app_dir) / "firmware_cache"
+                if answered:
+                    c5_resume.board_answered(cache, answered)
+                workspace = getattr(getattr(self, "_flash_workspace", None), "name", None)
+                self._c5_pending = c5_resume.find(cache, workspace)
+            except Exception:
+                self._c5_pending = None
+        try:
+            threading.Thread(target=work, name="c5-pending", daemon=True).start()
+        except Exception:
+            pass
+
+    def _fwnote_steps(self):
+        """F on the Firmware screen: the exact by-hand steps go to OUTPUT and into a file next to
+        the device backup (written on a worker thread)."""
+        pending = getattr(self, "_c5_pending", None)
+        if pending is None:
+            return
+        package = getattr(self, "_fw_package", None)
+        def work():
+            try:
+                from . import c5_resume
+                lines = c5_resume.hand_steps(pending, self._app_dir, getattr(package, "image_name", ""))
+                saved = c5_resume.write_steps_file(pending, lines)
+                for line in lines:
+                    self._term_add("[FW] " + line, raw=True)
+                if saved:
+                    self._term_add("[FW] These steps are also in " + saved, raw=True)
+            except Exception as exc:
+                self._term_add(f"[FW] Could not list the steps: {exc}", raw=True)
+        try:
+            threading.Thread(target=work, name="c5-steps", daemon=True).start()
+        except Exception:
+            pass
+
     def _run_flash(self, board: str):
         # Real instances initialize both locks before any UI/worker can run.
         # Lazy creation also supports old isolated method harnesses.
@@ -6178,6 +6277,7 @@ class WatchDogsGame:
         self._fw_expected_version = ""
         self._fw_recovery_needed = False
         self._fw_recovery_version = getattr(self, "_fw_version", "")
+        self._fw_backup_directory = self._fw_journal_directory = None   # [bristle] this job's own
         try:
             self._c5_set_flash_stage("prepare")
             if not getattr(self, "_shutting_down", False):
@@ -6191,6 +6291,12 @@ class WatchDogsGame:
                                    "handshake_running", "portal_running", "evil_twin_running",
                                    "sniffer_running", "bt_wardriving_running", "bt_scan_running",
                                    "bt_tracking_running", "bt_airtag_running", "wardriving_running")
+                    if getattr(self, "_fw_resume", None) is not None:
+                        # [bristle] finishing a write that was cut off: a board whose application
+                        # is half written cannot acknowledge the "stop" it was sent on connecting,
+                        # so an unanswered stop does not block this one job. Everything else does.
+                        active_flags = tuple(flag for flag in active_flags
+                                             if flag not in ("_esp_stop_waiting", "_esp_stop_required"))
                     solo = getattr(self, "_solo", None)
                     if (any(getattr(self, flag, False) for flag in active_flags)
                             or any(getattr(self.state, flag, False) for flag in state_flags)
@@ -6299,7 +6405,14 @@ class WatchDogsGame:
                     self._fw_expected_version = ""
                 self._fw_migration_authorization = None
                 self._fw_migration_serial_token = None
+                self._fw_resume = None           # [bristle] one confirmed "finish the write" per job
                 job_lock.release()
+                _rescan = getattr(self, "_fwnote_scan", None)   # [bristle] what is unfinished now
+                if _rescan is not None and not getattr(self, "_shutting_down", False):
+                    try:
+                        _rescan()
+                    except Exception:
+                        pass
 
     def _flash_do(self, board: str):
         """Prepare one fresh board-specific bundle, then exclusively flash it."""
@@ -6356,7 +6469,12 @@ class WatchDogsGame:
                                      preflight_device, authorize_install, validate_authorization,
                                      backup_migration_device, wait_bound_port)
             package = fetch_latest_package()
-            if authorization is None:
+            if getattr(self, "_fw_resume", None) is not None:
+                # [bristle] finishing a write that was cut off: the board cannot answer, so it is
+                # not asked for a version. It is checked against the record of that write below,
+                # once its USB identity is known (watchdogs/c5_resume.py).
+                authorization = None
+            elif authorization is None:
                 authorize_install(package, self._fw_version)
             else:
                 if self._c5_serial_token() != getattr(self, "_fw_migration_serial_token", None):
@@ -6367,7 +6485,7 @@ class WatchDogsGame:
             image = download_image(package, attempt / package.image_name)
             verify_image(package, image)
             self._fw_package = package
-            self._c5_flash_log(f"[FW] C5 fork package {package.version}; application only", raw=True)
+            self._c5_flash_log(f"[FW] C5/SOLO package {package.version}; application only", raw=True)
         if getattr(self, "_shutting_down", False) or getattr(self, "_c5_cancel_requested", False):
             return
         self._c5_set_flash_stage("release-port")
@@ -6377,6 +6495,9 @@ class WatchDogsGame:
         if not port or not Path(port).exists():
             raise FlashError("ESP32 USB port was not detected; connection and USB power were left unchanged")
         identity = bind_usb_identity(port) if package is not None else None
+        if package is not None and getattr(self, "_fw_resume", None) is not None:   # [bristle]
+            from . import c5_resume
+            c5_resume.check_resume(self._fw_resume, package, identity, FlashError)
         if authorization is not None:
             validate_authorization(authorization, package, identity, getattr(self, "_fw_generation", 0))
             if self._c5_serial_token() != getattr(self, "_fw_migration_serial_token", None):
@@ -6512,9 +6633,16 @@ class WatchDogsGame:
             return
         self._flash_status = "Flashing ESP32..."
         self._fw_recovery_needed = False
+        # [bristle] note on disk that the write begins, so a write that is cut off can be told
+        # from one that never started and can be finished later (watchdogs/c5_resume.py)
+        _journal = getattr(self, "_fwnote_journal", None) if package is not None else None
+        if _journal is not None:
+            _journal("write-started", package, identity)
         run_esptool(command, lambda line: self._c5_flash_log(f"[FLASH] {line}", raw=True),
                     on_process=lambda process: setattr(self, "_flash_process", process))
         self._flash_write_complete = True
+        if _journal is not None:
+            _journal("write-complete")
         self._c5_set_flash_stage("confirm-application")
         self._c5_flash_log("[FLASH] esptool write completed; firmware start is not yet confirmed.", raw=True)
         if getattr(self, "_shutting_down", False):
@@ -7060,6 +7188,12 @@ class WatchDogsGame:
                 else:
                     self._fw_version = reported_version
                     self._term_add(f"[FW] JanOS {self._fw_version}; the version number does not establish SOLO support", raw=True)
+                    # [bristle] the board answers: an unfinished-install note on disk is settled
+                    if (getattr(self, "_c5_pending", None) is not None
+                            or getattr(self, "_fw_journal_directory", None) is not None):
+                        _settle = getattr(self, "_fwnote_scan", None)
+                        if _settle is not None:
+                            _settle(reported_version)
                     if not getattr(self, "_flash_fw_pending", False):
                         self._fw_usb_identity = None
                     if recovering:
@@ -9167,6 +9301,13 @@ class WatchDogsGame:
         if self.menu_open:
             return
         cx, cy = W // 2, HUD_TOP + MAP_H // 2
+        # [bristle] While a plugin holds the map on another spot (_map_focus), the player is drawn
+        # where the player is, not in the middle of the screen; off the map, not at all.
+        _map_focus = getattr(self, "_map_focus", None)
+        if _map_focus:
+            cx, cy = self.proj.geo_to_screen(self.player_lat, self.player_lon)
+            if not (6 <= cx <= W - 6 and HUD_TOP + 8 <= cy <= TERM_Y - 10):
+                return
 
         # Sonar ping — an expanding ring sweeps out from the avatar across the
         # map every ~4s, fading cyan -> dim. Clipped to the map so it never
@@ -11005,7 +11146,7 @@ class WatchDogsGame:
                 break
 
     def _draw_flash_screen(self):
-        """Show the own-fork C5 firmware version and installer."""
+        """Show this build's C5/SOLO firmware version and installer."""
         from .config import FLASH_BOARDS, FIRMWARE_RELEASE_URL, UPSTREAM_FIRMWARE_ENABLED
         if not UPSTREAM_FIRMWARE_ENABLED:
             dw, dh = 420, 240
@@ -11026,6 +11167,19 @@ class WatchDogsGame:
                         "Y MIGRATE   N / ESC CANCEL"]
                 for row, text in enumerate(rows):
                     pyxel.text(dx + 6, dy + 8 + row * 20, text[:80], C_WARNING if row in (0, 5, 9) else C_TEXT)
+                return
+            # [bristle] an install that did not finish: what state the board is in, in plain words
+            # (the text is built in watchdogs/c5_resume.py; this only puts it on the screen)
+            _pending = getattr(self, "_c5_pending", None)
+            if getattr(self, "_c5_pending_page", False) and _pending is not None:
+                from . import c5_resume
+                _lines = c5_resume.state_lines(_pending, getattr(self, "_fw_version", ""))
+                for row, (text, heading) in enumerate(_lines[:15]):
+                    pyxel.text(dx + 6, dy + 8 + row * 12, text[:80], C_WARNING if heading else C_TEXT)
+                pyxel.text(dx + 6, dy + dh - 40, "The exact steps to do it by hand are in OUTPUT (below) and in", C_DIM)
+                pyxel.text(dx + 6, dy + dh - 28, (c5_resume.STEPS_FILE + ", in the folder named there.")[:80], C_DIM)
+                pyxel.text(dx + 6, dy + dh - 14, "Y finish the write now   N / ESC back"
+                           if _pending.resumable and not self._flash_running else "N / ESC back", C_WARNING)
                 return
             pyxel.text(dx + 6, dy + 6, "C5/SOLO FIRMWARE UPDATE", C_WARNING)
             detected = f"Reported JanOS: {self._fw_version}" if self._fw_version else "Reported JanOS: unknown"
@@ -11051,7 +11205,7 @@ class WatchDogsGame:
                       (getattr(self, "_c5_esptool_error", "") or getattr(self, "_fw_error", "")
                        or getattr(self, "_flash_status", "")))
             if not status and package is not None:
-                status = "Package ready from the C5 fork."
+                status = "Package ready: the image shipped with this build."
             for row, start in enumerate(range(0, min(len(status), 156), 78)):
                 pyxel.text(dx + 6, dy + 144 + row * 12, status[start:start + 78], C_TEXT)
             controls = ("C cancel before write; ESC close (continues)" if self._flash_running and
@@ -11059,6 +11213,15 @@ class WatchDogsGame:
                         not getattr(self, "_flash_write_started", False) else
                         "ESC close (operation continues)" if self._flash_running else
                         "P repair Python  R check  M migrate  ENTER install  ESC close")
+            # [bristle] one line when an install on disk did not finish, and the key for its page.
+            # A write that is on record as unfinished is always said; the weaker signs only while
+            # the board is silent.
+            if _pending is not None and not self._flash_running and (
+                    _pending.urgent or not getattr(self, "_fw_version", "")):
+                from . import c5_resume
+                pyxel.text(dx + 6, dy + 176, c5_resume.summary_line(_pending)[:80],
+                           C_WARNING if _pending.urgent else C_DIM)
+                controls = "F unfinished install  P repair  R check  M migrate  ENTER install  ESC close"
             pyxel.text(dx + 6, dy + dh - 14, controls, C_DIM)
             return
         ROW_H = 14
@@ -11102,7 +11265,7 @@ class WatchDogsGame:
                        "UP/DOWN  ENTER flash  ESC cancel", C_DIM)
 
     # ------------------------------------------------------------------
-    # Update Game: own-fork releases, persistent notices and code-only upgrades.
+    # Update Game: this build's releases, persistent notices and code-only upgrades.
     # ------------------------------------------------------------------
 
     def _init_game_updates(self):

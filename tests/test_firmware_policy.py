@@ -1,4 +1,4 @@
-"""Production follows the own upstream channel; writes require manual entry."""
+"""Production uses this build's own firmware source; a write always needs a manual start."""
 import ast
 import json
 import os

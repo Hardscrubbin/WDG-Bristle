@@ -154,6 +154,18 @@ def _phy_supports_monitor(iface):
     return "* monitor" in block[1].split("Supported", 1)[0]
 
 
+def phy_info(iface):
+    """[bristle] The text of `iw phy <phy> info` for this interface ("" when it cannot be read).
+    It lists every frequency the card can tune; plugins/_kismet_extras.parse_iw_channels reads it.
+    Read only: nothing about the card is changed. Call it off the game thread."""
+    rc, phy_out, _ = _run(["iw", "dev", iface, "info"])
+    m = re.search(r"wiphy\s+(\d+)", phy_out)
+    if not m:
+        return ""
+    rc2, info, _ = _run(["iw", "phy", f"phy{m.group(1)}", "info"])
+    return info if rc2 == 0 else ""
+
+
 # ---------------- static interface pinning (udev + NetworkManager) ----------------
 # This is the actual fix for the Alfa card "popping in and out" on the
 # Kismet adapter picker: Kismet's own retry=true (see kismet_wardrive.py's

@@ -1,4 +1,4 @@
-"""upstream repair/migration UI with real controller and fake USB/process boundaries.
+"""The C5/SOLO repair and migration screens, with the real controller and fake USB/process boundaries.
 
 No test opens a serial device, installs a dependency or executes esptool.
 """

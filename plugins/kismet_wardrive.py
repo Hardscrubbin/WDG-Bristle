@@ -570,7 +570,10 @@ class KismetBridgeEngine:
                 continue
         self.log("[KISMET] Couldn't auto-find Kismet's login -- stats may not authenticate.")
 
-    def start(self, wifi_ifaces, ble_adapters, gps_override=False, gps_endpoint=None):
+    def start(self, wifi_ifaces, ble_adapters, gps_override=False, gps_endpoint=None, channel_locks=None):
+        # [bristle] channel_locks: {interface: channel} for cards that stay on one channel
+        self.channel_locks = dict(channel_locks or {})
+        self.locked = {}                 # uuid -> channel, filled once Kismet confirms a lock
         if not wifi_ifaces and not ble_adapters:
             self.log("[KISMET] No capture sources selected -- nothing to start")
             return False
@@ -609,6 +612,11 @@ class KismetBridgeEngine:
                 self.log(f"[KISMET] Could not write GPS override ({e}) -- "
                          f"starting without it")
         for iface in wifi_ifaces:
+            lock = self.channel_locks.get(iface)
+            if lock:                     # [bristle] this card stays on one channel
+                cmd += ["-c", f"{iface}:channel_hop=false,channel={lock},retry=true"]
+                self.log(f"[KISMET] {iface} is locked to channel {lock} (no hopping)")
+                continue
             cmd += ["-c", f"{iface}:channel_hop=true,retry=true"]
         for hci in ble_adapters:
             cmd += ["-c", f"{hci}:name={hci}_bt,retry=true"]
@@ -705,9 +713,30 @@ class KismetBridgeEngine:
             r = self._get(f"{KISMET_URL}/datasource/all_sources.json", auth=self._auth(), timeout=5)
             if r.status_code != 200:
                 return [], f"HTTP {r.status_code}"
-            return kx.parse_sources(r.json()), None
+            rows = kx.parse_sources(r.json())
+            locked = getattr(self, "locked", None) or {}
+            for row in rows:             # [bristle] a card held on one channel says so
+                if row["uuid"] in locked:
+                    row["lock"] = locked[row["uuid"]]
+            return rows, None
         except (requests.RequestException, ValueError) as e:
             return [], str(e)
+
+    def set_channel(self, uuid, channel):
+        """[bristle] Hold one datasource on ``channel`` (no hopping). (ok, reason), as
+        set_hop_channels: the same Kismet command with a single channel."""
+        if not HAVE_REQUESTS:
+            return False, "requests library not installed"
+        try:
+            r = self._post(f"{KISMET_URL}/datasource/by-uuid/{uuid}/set_channel.cmd",
+                           auth=self._auth(), data={"json": json.dumps({"channel": str(channel)})}, timeout=5)
+        except requests.RequestException as e:
+            return False, str(e)
+        if r.status_code == 200:
+            return True, None
+        if r.status_code in (401, 403):
+            return False, f"HTTP {r.status_code}: this Kismet login may not change datasources"
+        return False, f"HTTP {r.status_code}"
 
     def set_hop_channels(self, uuid, channels, rate=5.0):
         """[merge-v3] Tell one datasource to hop over ``channels`` only.
@@ -941,7 +970,7 @@ def positioned_wigle_export(csv_path):
     raw file, so such rows would have reached WiGLE as "seen at 0,0". The two
     header lines are kept verbatim; a data row is kept only if it parses as a
     WiGLE row and has a real position, judged by the same
-    LootManager._observation_position_missing() check the rest of v3 uses.
+    LootManager._observation_position_missing() check the rest of this build uses.
 
     Kept rows are re-serialised from the parsed fields with the name passed
     through LootManager._csv_safe(): upstream stores names exactly as received, so
@@ -1097,6 +1126,13 @@ class KismetWardriveBridge(PluginBase):
         self._split_applied = None             # frozenset of uuids the split was made for
         self._split_original = {}              # uuid -> (hop channels, rate) before a split
         self._split_report = "not started"     # for Self-Test / Hardware Check
+        # [bristle] per-card channel lock (LEFT/RIGHT on a Wi-Fi row in the picker)
+        self._wifi_lock = {}                   # picker: interface id -> channel, for cards that do not hop
+        self._wifi_channels = {}               # interface id -> channels the card lists (read on a worker)
+        self._launch_locks = {}                # (mac or id) -> channel, as the launch was confirmed
+        self._locks_wanted = {}                # interface -> channel, for the Kismet that is running
+        self._locks_said = set()               # (uuid, channel) already reported as not possible
+        self._plan_cache = (None, [])          # the picker's per-card lines, and what they were made from
         self._crash_times = []
         self._poll_fail_count = 0
         self._poll_fail_text = ""
@@ -1373,6 +1409,8 @@ class KismetWardriveBridge(PluginBase):
         self._wifi_selected = set()
         self._wifi_monitor = {}
         self._ble_selected = set()
+        self._wifi_lock = {}             # [bristle] filled again from the saved choice, per adapter
+        self._wifi_channels = {}
         # [merge-v3] An adapter on the AIO's internal USB-C port (the AC1200)
         # only exists while that rail (GPIO 23) is on. Power it before looking.
         powered = self._power_internal_usb()
@@ -1482,11 +1520,60 @@ class KismetWardriveBridge(PluginBase):
                             if b["id"] in self._ble_selected and b.get("mac")})
         if not wifi_macs and not ble_macs:
             return
+        # [bristle] the channel lock is kept per adapter (by MAC), also for an adapter that is
+        # not plugged in today: only the cards in front of us are changed.
+        locks = dict((self._load_adapter_prefs() or {}).get("wifi_locks") or {})
+        chosen = getattr(self, "_wifi_lock", None) or {}
+        for w in self._wifi_all:
+            if not w.get("mac"):
+                continue
+            if chosen.get(w["id"]):
+                locks[w["mac"]] = str(chosen[w["id"]])
+            else:
+                locks.pop(w["mac"], None)
         try:
             with open(self._adapters_pref_path(), "w", encoding="utf-8") as fh:
-                json.dump({"wifi_macs": wifi_macs, "ble_macs": ble_macs}, fh)
+                json.dump({"wifi_macs": wifi_macs, "ble_macs": ble_macs, "wifi_locks": locks}, fh)
         except OSError as exc:
             self.term(f"[KISMET] Could not save adapter preference: {exc}")
+
+    # ------------------------------------------------------------------
+    # [bristle] Per-card channel lock and the per-card channel plan
+    # ------------------------------------------------------------------
+
+    def _read_card_channels(self, ids):
+        """Worker thread: ask each card which channels it can tune (`iw phy`, read only)."""
+        for iface in ids:
+            try:
+                text = hw.phy_info(iface)
+            except Exception:
+                text = ""
+            self._wifi_channels[iface] = kx.parse_iw_channels(text)
+
+    def _step_lock(self, iface, step):
+        """LEFT/RIGHT on a Wi-Fi row: hop -> the card's first channel -> ... -> its last -> hop."""
+        choices = [None] + kx.lock_choices(self._wifi_channels.get(iface))
+        current = self._wifi_lock.get(iface)
+        index = choices.index(current) if current in choices else 0
+        chosen = choices[(index + step) % len(choices)]
+        if chosen is None:
+            self._wifi_lock.pop(iface, None)
+        else:
+            self._wifi_lock[iface] = chosen
+
+    def _plan_rows(self):
+        """[(interface, text)]: what each ticked Wi-Fi card will do. Made again only when the
+        selection, a lock, a card's channel list or the split switch changes."""
+        channels = getattr(self, "_wifi_channels", {})
+        locks = getattr(self, "_wifi_lock", {})
+        picked = [w for w in self._wifi_all if w["id"] in self._wifi_selected]
+        key = (tuple((w["id"], locks.get(w["id"]), tuple(channels.get(w["id"]) or ())) for w in picked),
+               self._split_mode)
+        if getattr(self, "_plan_cache", (None,))[0] != key:
+            cards = [(w["id"], w["id"], channels.get(w["id"]) or []) for w in picked]
+            wanted = {w["id"]: locks[w["id"]] for w in picked if locks.get(w["id"])}
+            self._plan_cache = (key, kx.picker_plan(cards, wanted, split_on=self._split_mode == "band"))
+        return self._plan_cache[1]
 
     def _rescan_adapters(self, initial: bool = False):
         """v2.2: re-run hw.detect_wifi()/detect_ble() while the adapter
@@ -1540,6 +1627,8 @@ class KismetWardriveBridge(PluginBase):
         self._ble_selected -= removed_ble_ids
         for iface in removed_wifi_ids:
             self._wifi_monitor.pop(iface, None)
+            self._wifi_lock.pop(iface, None)          # [bristle]
+            self._wifi_channels.pop(iface, None)
 
         # Newly appeared -- v-next: if a MAC allowlist was saved from a
         # prior successful launch (_save_adapter_prefs(), written right
@@ -1556,6 +1645,14 @@ class KismetWardriveBridge(PluginBase):
             added_wifi = [w for w in new_wifi if w["id"] in added_wifi_ids]
             for w in added_wifi:
                 self._wifi_monitor[w["id"]] = w["can_monitor"]
+            # [bristle] a card comes back with the channel lock saved for it, and its channel
+            # list is read on a worker thread (the plan lines fill in when it arrives)
+            saved_locks = (prefs or {}).get("wifi_locks") or {}
+            for w in added_wifi:
+                if w.get("mac") and saved_locks.get(w["mac"]):
+                    self._wifi_lock[w["id"]] = str(saved_locks[w["mac"]])
+            threading.Thread(target=self._read_card_channels, args=([w["id"] for w in added_wifi],),
+                             name="kismet-card-channels", daemon=True).start()
             if prefs is not None:
                 allowed_macs = set(prefs.get("wifi_macs") or [])
                 keep = {w["id"] for w in added_wifi if w.get("mac") in allowed_macs}
@@ -1661,6 +1758,11 @@ class KismetWardriveBridge(PluginBase):
         if not wifi_sel and not ble_sel:
             self.msg("Select at least one adapter first")
             return
+        # [bristle] the channel locks go with the launch, by MAC where the card has one (a card
+        # may come back under another name), by interface name otherwise
+        chosen = getattr(self, "_wifi_lock", None) or {}
+        self._launch_locks = {(mac or iface): str(chosen[iface])
+                              for iface, mac, _mon in wifi_sel if chosen.get(iface)}
 
         self._overlay_active = False
         if not rotation:
@@ -1696,6 +1798,8 @@ class KismetWardriveBridge(PluginBase):
         term() (lock-protected); the result goes to on_update()."""
         forced, wifi_ready, ble_ready = [], [], []
         ok = False
+        locks = {}                       # [bristle] interface -> channel, for this launch
+        launch_locks = dict(getattr(self, "_launch_locks", None) or {})
         try:
             for iface, mac, want_mon in wifi_sel:
                 cur = iface
@@ -1729,6 +1833,17 @@ class KismetWardriveBridge(PluginBase):
                         continue
                     forced.append(cur)
                 wifi_ready.append(cur)
+                wanted = launch_locks.get(mac or iface)
+                if wanted:               # [bristle] can this card tune the channel it is locked to?
+                    try:
+                        listed = kx.parse_iw_channels(hw.phy_info(cur))
+                    except Exception:
+                        listed = []
+                    if listed and kx.lock_name(wanted, listed) is None:
+                        self.term(f"[KISMET] {cur} cannot tune channel {wanted} -- the lock is "
+                                  f"dropped for this run and it hops like the others")
+                    else:
+                        locks[cur] = wanted
 
             for hci, mac in ble_sel:
                 cur = hci
@@ -1754,10 +1869,16 @@ class KismetWardriveBridge(PluginBase):
                 self.term(f"[KISMET] Starting with WiFi: {wifi_ready or '(none)'}, "
                           f"BLE: {ble_ready or '(none)'}")
                 endpoint = self._kismet_gps_endpoint() if use_gps else None   # [merge-v3]
-                ok = (self.engine.start(wifi_ready, ble_ready, gps_override=use_gps,
-                                        gps_endpoint=endpoint)
-                      if endpoint else
-                      self.engine.start(wifi_ready, ble_ready, gps_override=use_gps))
+                # [bristle] only named when there is one, like gps_endpoint: an engine without
+                # the argument (an older one, a stand-in) is called exactly as before
+                extra = {}
+                if endpoint:
+                    extra["gps_endpoint"] = endpoint
+                if locks:
+                    extra["channel_locks"] = locks
+                self._locks_wanted = dict(locks)
+                self._locks_said = set()
+                ok = self.engine.start(wifi_ready, ble_ready, gps_override=use_gps, **extra)
         except Exception as e:
             self.term(f"[KISMET] Start error: {e}")
             ok = False
@@ -2502,6 +2623,15 @@ class KismetWardriveBridge(PluginBase):
         # select/deselect (SPACE/RETURN) so the two don't collide.
         if kind == "wifi" and pyxel.btnp(pyxel.KEY_M):
             self._wifi_monitor[row_id] = not self._wifi_monitor.get(row_id, False)
+        # [bristle] LEFT/RIGHT step the highlighted Wi-Fi card through "hop" and each channel it
+        # can be locked to (held down, it repeats); L lets it hop again.
+        if kind == "wifi":
+            if pyxel.btnp(pyxel.KEY_RIGHT, 14, 3):
+                self._step_lock(row_id, 1)
+            elif pyxel.btnp(pyxel.KEY_LEFT, 14, 3):
+                self._step_lock(row_id, -1)
+            elif pyxel.btnp(pyxel.KEY_L):
+                self._wifi_lock.pop(row_id, None)
 
     def draw(self, x: int, y: int, w: int, h: int) -> None:
         if not self._overlay_active:
@@ -2513,12 +2643,13 @@ class KismetWardriveBridge(PluginBase):
         pyxel.text(x + 12, y + 12, "KISMET WARDRIVE -- SELECT ADAPTERS", 10)
         pyxel.line(x + 12, y + 22, x + w - 12, y + 22, 5)
         pyxel.text(x + 12, y + h - 20,
-                    "UP/DOWN move  SPACE/ENTER toggle  M monitor mode  "
+                    "UP/DOWN move  SPACE/ENTER toggle  M monitor mode  LEFT/RIGHT lock channel  L hop  "
                     "R rescan  S channel split  ESC cancel", 13)
         # [merge-v3] what two Wi-Fi adapters will do with the channels
+        # [bristle] 1.2: any number of cards; the lines under the list say what each one gets
         picked = sum(1 for wifi in self._wifi_all if wifi["id"] in self._wifi_selected)
         if picked >= 2:
-            split = ("Channel split ON: one adapter takes 2.4 GHz, the other 5/6 GHz  [S] off"
+            split = ("Channel split ON: each card gets its own share of the channels (listed above)  [S] off"
                      if self._split_mode == "band" else
                      "Channel split OFF: every adapter hops every channel  [S] on")
             pyxel.text(x + 12, y + h - 32, split, 11 if self._split_mode == "band" else 13)
@@ -2528,6 +2659,7 @@ class KismetWardriveBridge(PluginBase):
 
         rows = self._picker_rows()
         row_y = y + 32
+        locks = getattr(self, "_wifi_lock", None) or {}     # [bristle]
         for i, (kind, row_id, obj) in enumerate(rows):
             sel = (i == self._menu_sel)
             color = 10 if sel else 7
@@ -2547,7 +2679,21 @@ class KismetWardriveBridge(PluginBase):
                 label = f"{prefix}CANCEL"
                 color = 8 if sel else color
             pyxel.text(x + 16, row_y, label[:78], color)
+            if kind == "wifi" and locks.get(row_id):     # [bristle]
+                pyxel.text(x + 420, row_y, f"LOCKED: channel {locks[row_id]}"[:40], 9)
             row_y += 10
+        # [bristle] what each ticked Wi-Fi card will do: its share of the split, or its lock
+        if picked >= 2 or any(locks.get(wifi["id"]) for wifi in self._wifi_all
+                              if wifi["id"] in self._wifi_selected):
+            row_y += 6
+            if row_y < y + h - 66:
+                pyxel.text(x + 16, row_y, "CHANNEL PLAN", 10)
+                row_y += 10
+            for card, text in self._plan_rows():
+                if row_y >= y + h - 56:
+                    break
+                pyxel.text(x + 16, row_y, f"{card}: {text}"[:120], 11 if "cannot tune" not in text else 8)
+                row_y += 10
 
     # ------------------------------------------------------------------
     # Persistent HUD status (WiFi / BLE / GPS)
@@ -2804,21 +2950,34 @@ class KismetWardriveBridge(PluginBase):
         if running == self._split_applied:
             return
         by_uuid = {s["uuid"]: s for s in sources}
+        # [bristle] cards locked to one channel first: they are not part of the split
+        locks = self._settle_locks(sources, by_uuid, running)
+        lock_note = "".join("; %s locked on channel %s" % (by_uuid[uuid]["name"], channel)
+                            for uuid, channel in sorted(locks.items()))
         if self._split_mode != "band":
             self._split_applied = running
-            self._split_report = "off (WDG_KISMET_SPLIT=off or switched off in the picker)"
+            self._split_report = "off (WDG_KISMET_SPLIT=off or switched off in the picker)" + lock_note
             return
         # a source keeps its pre-split hop list as "original", once
         for uuid in running:
             source = by_uuid[uuid]
+            if uuid in locks:
+                # [bristle] a locked card's own list is everything it can tune (what it hops
+                # again if the lock is ever taken off), never the one channel it sits on
+                self._split_original.setdefault(uuid, (list(source["channels"] or source["hop_channels"]),
+                                                       source["hop_rate"]))
+                continue
             self._split_original.setdefault(uuid, (list(source["hop_channels"] or source["channels"]),
                                                    source["hop_rate"]))
-        originals = [dict(by_uuid[uuid], hop_channels=self._split_original[uuid][0]) for uuid in running]
-        plan, why = kx.plan_split(originals)
+        originals = [dict(by_uuid[uuid], hop_channels=self._split_original[uuid][0])
+                     for uuid in sorted(running, key=lambda u: by_uuid[u]["name"])]
+        plan, why = kx.plan_split(originals, locks)
         if not plan:
             # one adapter left (the other was unplugged), or no split possible:
             # whoever is still capturing goes back to all of its channels
             for uuid in running:
+                if uuid in locks:
+                    continue             # [bristle] a locked card stays where it is
                 channels, rate = self._split_original[uuid]
                 if channels and list(by_uuid[uuid]["hop_channels"]) != channels:
                     self.engine.set_hop_channels(uuid, channels, rate)
@@ -2827,6 +2986,13 @@ class KismetWardriveBridge(PluginBase):
             if len(self._split_original) > 1:
                 self._kismet_events.append(("info", "[KISMET] Channel split off: " + why))
             return
+        # [bristle] a card that is not in this plan (it had a share before, and now only the
+        # locked channel is taken out of the others' lists) goes back to all of its channels
+        for uuid in running:
+            if uuid not in plan and uuid not in locks:
+                channels, rate = self._split_original[uuid]
+                if channels and list(by_uuid[uuid]["hop_channels"]) != channels:
+                    self.engine.set_hop_channels(uuid, channels, rate)
         for uuid, channels in plan.items():
             ok, reason = self.engine.set_hop_channels(uuid, channels, self._split_original[uuid][1])
             if not ok:
@@ -2838,6 +3004,53 @@ class KismetWardriveBridge(PluginBase):
         self._split_applied = running
         self._split_report = "band split: " + why
         self._kismet_events.append(("ok", "[KISMET] Channels split between the adapters -- " + why))
+
+    def _settle_locks(self, sources, by_uuid, running) -> dict:
+        """[bristle] Poll thread: put every card that was launched with a channel lock on that
+        channel, going by what Kismet itself says the card can tune. Returns {uuid: channel} for
+        the locks that are in force. A card that cannot be held there (Kismet does not list the
+        channel for it, or refuses the command) is sent back to hopping all of its channels, and
+        that is said once in the terminal and on the HUD."""
+        wanted = getattr(self, "_locks_wanted", None) or {}
+        engine_locked = {}
+        if wanted:
+            asked = {}
+            for source in sources:
+                if source["kind"] == "wifi" and source["uuid"] in running:
+                    channel = wanted.get(source["interface"]) or wanted.get(source["name"])
+                    if channel:
+                        asked[source["uuid"]] = channel
+            ok, refused, unknown = kx.resolve_locks(sources, asked)
+            failed = dict(refused)
+            ok.update(unknown)           # no channel list from Kismet: ask, and go by its answer
+            for uuid, name in ok.items():
+                source = by_uuid[uuid]
+                if source.get("hopping") is False and kx.same_channel(source.get("channel") or "", name):
+                    engine_locked[uuid] = name       # the launch already put it there
+                    continue
+                good, reason = self.engine.set_channel(uuid, name)
+                if good:
+                    engine_locked[uuid] = name
+                else:
+                    failed[uuid] = "%s (%s)" % (asked[uuid], reason)
+            said = getattr(self, "_locks_said", None)
+            if said is None:
+                said = self._locks_said = set()
+            for uuid, channel in failed.items():
+                source = by_uuid[uuid]
+                channels = list(source["channels"] or source["hop_channels"])
+                if channels:
+                    self.engine.set_hop_channels(uuid, channels, source["hop_rate"])
+                if (uuid, channel) not in said:
+                    said.add((uuid, channel))
+                    self._kismet_events.append(("warn", "[KISMET] %s cannot be locked to channel %s -- "
+                                                        "it hops all of its channels instead"
+                                                % (source["name"], channel)))
+        try:
+            self.engine.locked = engine_locked       # read by datasources(): the node planner
+        except Exception:                            # then counts these channels as covered
+            pass
+        return engine_locked
 
     def _drain_kismet_events(self) -> None:
         """[merge-v3] Game thread: show what the poll thread found."""

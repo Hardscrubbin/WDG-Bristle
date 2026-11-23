@@ -35,7 +35,7 @@ Files, copied byte for byte from the WDGoNG 0.10.0 source archive:
     (about 29 MB). It is not part of the WDGoNG 0.10.0 source archive. The
     plugin uses it when the player copies it in (see plugins/ng_basemap.py).
 
-They are not modified. The code that connects them to upstream edition's pyxel game
+They are not modified. The code that connects them to the base edition's pyxel game
 is in plugins/ng_adsb_tracks.py and plugins/ng_subghz_capture.py; those two
 plugins were written for this build and follow the behaviour of WDGoNG's
 backend (wdgong_ui/backend.py: _adsb_rx_log, adsb_tracks, adsb_export_kml;
@@ -88,5 +88,5 @@ watchdogs/loot_manager.py counts a session's ADS-B aircraft as distinct ICAO
 codes (WDGoNG watchdogs/loot_manager.py: _fix_adsb_counts and the session
 scan). It is tagged [merge-v3] in that file.
 
-The rest of this tree is upstream edition 0.9.21.3; see ../../LICENSE and
+The rest of this tree is the base edition 0.9.21.3; see ../../LICENSE and
 ../../THIRD_PARTY_NOTICES.md.

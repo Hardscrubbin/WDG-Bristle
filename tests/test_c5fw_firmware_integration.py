@@ -1,4 +1,4 @@
-"""upstream routing through real app methods, with fake network/USB/processes only."""
+"""The C5/SOLO firmware path through the real app methods, with fake network/USB/processes only."""
 import threading
 from types import SimpleNamespace
 import unittest

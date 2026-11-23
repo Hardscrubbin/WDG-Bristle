@@ -509,6 +509,24 @@ class KismetChannels(unittest.TestCase):
         self.assertEqual(heavy, {1, 6, 11})
         self.assertIn("1, 6, 11", note)
 
+    def test_a_card_locked_to_one_channel_makes_that_channel_heavy(self):
+        everything = [str(c) for c in range(1, 14)] + [str(c) for c in range(36, 166, 4)]
+        hopping = {"kind": "wifi", "running": True, "hop_channels": everything}
+        # the core locked it: the lock wins over the hop list Kismet still reports for the card
+        heavy, note = kismet_heavy_channels([hopping, {"kind": "wifi", "running": True, "lock": "6",
+                                                       "hop_channels": everything}])
+        self.assertEqual(heavy, {6})
+        self.assertIn("6", note)
+        # Kismet itself says the card is not hopping and where it is
+        heavy, _note = kismet_heavy_channels([hopping, {"kind": "wifi", "running": True, "hopping": False,
+                                                        "channel": "149", "hop_channels": everything}])
+        self.assertEqual(heavy, {149})
+        # a hopping card that reports the channel it is on at this moment is still a hopping card
+        heavy, _note = kismet_heavy_channels([dict(hopping, hopping=True, channel="3")])
+        self.assertEqual(heavy, set())
+        # a locked card that is not capturing covers nothing
+        self.assertEqual(kismet_heavy_channels([hopping, {"kind": "wifi", "running": False, "lock": "6"}])[0], set())
+
     def test_no_wifi_capture_is_said_plainly(self):
         self.assertEqual(kismet_heavy_channels([])[0], set())
         self.assertIn("not capturing", kismet_heavy_channels([{"kind": "bt", "running": True}])[1])

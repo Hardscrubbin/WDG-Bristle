@@ -467,7 +467,7 @@ class WardriveSoloController:
             return
         if protocol == "wifi":
             # Firmware reports the AP's advertised primary channel. A frame
-            # received while tuned to a upstream channel can belong to an adjacent
+            # received while tuned to a tuned-profile channel can belong to an adjacent
             # channel, so this is not the receiver's tuning/capability list.
             if (not _text(event.get("ssid"), 32) or not _text(event.get("auth"), 64)
                     or type(event.get("channel")) is not int

@@ -1,4 +1,4 @@
-"""Own-fork firmware metadata/download and ROM-read preflight, no real devices."""
+"""This build's firmware metadata, download and read-only ROM preflight; no real devices."""
 import binascii
 from dataclasses import replace
 import hashlib

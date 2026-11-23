@@ -486,7 +486,7 @@ loot/
 
 ## Game Updates
 
-Open **SYSTEM → Update Game** for the installed version. This build has no in-game updater: the window says **Updates: managed manually** and installs nothing. The startup screen keeps LOCOSP’s credit, with **WDG-Bristle 1.0** underneath.
+Open **SYSTEM → Update Game** for the installed version. This build has no in-game updater: the window says **Updates: managed manually** and installs nothing. The startup screen keeps LOCOSP’s credit, with **WDG-Bristle 1.2** underneath.
 
 Update by pulling this repository and running the installer again. The [update guide](UPDATING.md) has the steps and says what is kept.
 

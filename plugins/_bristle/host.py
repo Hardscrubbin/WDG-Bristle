@@ -86,6 +86,59 @@ class WdgHost:
             getattr(self.app, list_name).append(sprite)
         except Exception:
             pass                                    # the find is saved; only the marker is missing
+        # The game draws a marker only for something it has on record as heard in this session
+        # at a position (app._session_scan_points). Its own scanners file that through
+        # _record_scan_map_observation; so does this, or the marker above would never be drawn.
+        try:
+            record = getattr(self.app, "_record_scan_map_observation", None)
+            if callable(record):
+                channel = str(args[2]) if kind == "wifi" and len(args) > 2 else ""
+                record("wifi" if kind == "wifi" else "bt", str(args[0]), str(args[1]) if len(args) > 1 else "",
+                       args[-1] if args else None, channel, position={"lat": lat, "lon": lon, "source": "measured"})
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ the map's view
+    def map_view(self):
+        """What the map shows, for "open on the map": {"spans" (degrees across the screen at each
+        zoom level, widest first), "zoom", "width", "map_h", "to_screen" (lat, lon -> x, y)}; None
+        when the game has no map to ask."""
+        try:
+            from watchdogs import app as game
+            proj = self.app.proj
+            return {"spans": [float(level[0]) for level in game.ZOOM_LEVELS], "zoom": int(proj.zoom),
+                    "width": int(game.W), "map_h": int(game.MAP_H), "to_screen": proj.geo_to_screen}
+        except Exception:
+            return None
+
+    def map_focus(self, lat: float, lon: float, zoom=None) -> bool:
+        """Hold the map on a spot (the game's camera reads ``_map_focus`` instead of following the
+        player), and go to a zoom level if one is given. The zoom in use before is remembered."""
+        proj = getattr(self.app, "proj", None)
+        if proj is None:
+            return False
+        if getattr(self.app, "_map_focus", None) is None:
+            self._zoom_before = getattr(proj, "zoom", None)
+        self.app._map_focus = (float(lat), float(lon))
+        if zoom is not None:
+            try:
+                proj.zoom = int(zoom)
+            except Exception:
+                pass
+        return True
+
+    def map_release(self) -> None:
+        """Let the map follow the player again, at the zoom it had before."""
+        if getattr(self.app, "_map_focus", None) is None:
+            return
+        self.app._map_focus = None
+        before, proj = getattr(self, "_zoom_before", None), getattr(self.app, "proj", None)
+        if before is not None and proj is not None:
+            try:
+                proj.zoom = before
+            except Exception:
+                pass
+        self._zoom_before = None
 
     def message(self, text: str, colour: int = 7) -> None:
         msg = getattr(self.app, "msg", None)

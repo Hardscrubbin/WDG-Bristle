@@ -1,3 +1,29 @@
+# WDG-Bristle 1.2 (base 0.9.21.3)
+
+Built and unit-tested on a PC. Nothing in this entry has run on the uConsole, on a Wi-Fi card
+under Kismet or on a board yet; the bench list is `bristle/docs/BENCH_TESTS.md`.
+
+- Kismet adapter picker: a Wi-Fi card can be locked to one channel instead of hopping (LEFT/RIGHT
+  on its row, L to let it hop again). The lock is saved per adapter and goes with the launch. A
+  card that cannot tune the channel hops instead, and the picker and the terminal say so.
+- The channel split works for any number of Wi-Fi cards: three cards take 2.4 GHz, 5 GHz low
+  (36-64) and 5 GHz high (100 and up); a fourth takes 6 GHz if it can tune it; further cards
+  share the busiest bands. The picker lists what each card gets. As before, a channel only one
+  card can tune stays with it, nothing is dropped when a card is unplugged, and
+  `WDG_KISMET_SPLIT=off` switches the split off.
+- A locked channel is left out of the split, and the Bristle node planner counts it as covered
+  by Kismet (the nodes give it their shortest dwell).
+- Skimmer suspects: **M** opens the suspect on the map. The map is centred on the estimated spot
+  at a zoom that shows the whole confidence radius, and the radius is drawn. ESC or an arrow key
+  lets the map follow you again.
+- First install: the installer looks for an earlier install in any folder under your home whose
+  name is one of the earlier install names, copies your data from the one with the newest data,
+  and lists what it found and what it copied (also in `copied-from-earlier-install.txt`). The old
+  folder is only read. `./install.sh --from=FOLDER` names the folder yourself.
+- SYSTEM > Firmware: a firmware write that is cut off can be finished from the screen (**F**),
+  with the same approved image on the same board. The screen says in plain words what state the
+  board is in, and the exact steps to finish or undo by hand are printed and saved next to the
+  device backup.
 # WDG-Bristle 1.1 (base 0.9.21.3)
 
 Built and unit-tested on a PC. Nothing in this entry has run on the uConsole or on a board yet;
@@ -113,8 +139,8 @@ minor versions.
 - Repair the already-required esptool in the actual game interpreter, including existing .venv installations and an explicit in-panel P repair after OTA. Keep requirements.txt and minimum 5.0.0 unchanged; failed install/tool checks never flash.
 - Add a separately confirmed M/Y migration for a fresh, explicit missing-SOLO response from the current native XIAO ESP32-C5 rev1.0/8MiB device. Explicitly disclose the older JanOS 1.7.0+SOLO base; ordinary downgrade protection and same-version reinstalls remain.
 - Retain image/USB/ROM/security/table/active-slot/port checks. Before migration, require two independent matching private full-flash recovery reads and original application sectors. Write only the approved app with unchanged transfer settings; keep backups out of Git and public reports.
-- Confirm a returning upstream installation with fresh version AND SOLO interface responses. Timeouts, disconnects, partial/stale replies and exit0 alone are not success or migration permission.
-- Distinguish reported JanOS, SOLO interface confirmation and the approved package; stop branding plain version numbers as upstream.
+- Confirm a returning C5/SOLO installation with fresh version AND SOLO interface responses. Timeouts, disconnects, partial/stale replies and exit0 alone are not success or migration permission.
+- Distinguish reported JanOS, SOLO interface confirmation and the approved package; stop labelling plain version numbers with the edition's name.
 - Keep all C5/SOLO 1.7.0 and Piglet BIN/manifest bytes unchanged; game 0.9.21.1 never automatically flashes ESP32. No Dark3D/Android or architecture changes.
 - Physical migration remains NOT VERIFIED.
 

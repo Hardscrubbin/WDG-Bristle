@@ -220,7 +220,7 @@ def main(argv=None) -> int:
         log.write("SUMMARY: this run did not finish (the summary is written here when it does)\n")
         log.write("folder %s | python %s | started %s | gpsd on this machine: %s\n"
                   % (ROOT, sys.version.split()[0], stamp, gpsd_state))
-        print("[1/2] Test suite: %d file(s)%s" % (len(files), " (quick: v3 tests only)" if quick else ""))
+        print("[1/2] Test suite: %d file(s)%s" % (len(files), " (quick: this build's own tests only)" if quick else ""))
         for index, path in enumerate(files, 1):
             result = run_file(python, path, env)
             results.append(result)

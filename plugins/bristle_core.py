@@ -33,7 +33,7 @@ SOUNDS = {"notice": (52, "c3e3", "t", "4", "n", 14), "warning": (53, "a3d3a3d3",
 
 class BristleNodes(PluginBase):
     NAME = "Bristle: Nodes"
-    VERSION = "1.1"
+    VERSION = "1.2"
     AUTHOR = "WDG-Bristle"
     BACKGROUND_TICK = True          # nodes keep delivering while the screen is closed
 
@@ -63,6 +63,8 @@ class BristleNodes(PluginBase):
         self._hunt_mac = ""
         self._last_beep = 0.0
         self._sounds_ready = set()
+        self._focus = None             # a suspect opened on the map (mapfocus.Focus)
+        self._marked = set()           # suspects that already have their marker on the map
 
     # ------------------------------------------------------------------ plugin interface
     def menu_items(self):
@@ -146,6 +148,8 @@ class BristleNodes(PluginBase):
         key = getattr(pyxel, "KEY_" + str(svc.conf.get("hud_key", "F8")).upper(), None)
         if key is not None and pyxel.btnp(key):
             self._toggle_hud()
+        if self._focus is not None and not self._overlay_active:
+            self._focus_keys(pyxel)
         if self._overlay_active:
             if self._dialog is not None:
                 self._dialog_keys(pyxel)
@@ -502,10 +506,7 @@ class BristleNodes(PluginBase):
             if est is None:
                 self._say("No estimated spot yet: it has no sighting with a GPS position", screen.C_WARN)
             else:
-                self.host.marker("bt", est.lat, est.lon, skimmer.colon(mac), "POSSIBLE SKIMMER " + (suspect.name or ""),
-                                 suspect.points[-1][3] if suspect.points else -90)
-                self._say("Marked on the map at %.6f, %.6f (within about %d m). Close this screen to see it."
-                          % (est.lat, est.lon, round(est.radius_m)), screen.C_OK)
+                self._open_on_map(pyxel, mac, suspect, est)
         elif pyxel.btnp(pyxel.KEY_R):
             svc.do(lambda: engine.mark(mac, skimmer.STATUS_REPORTED))
             self._say("Marked as reported", screen.C_OK)
@@ -530,6 +531,38 @@ class BristleNodes(PluginBase):
                 self._say("Writing the report to loot/skimmers/reports", screen.C_OK)
             self._ask("REPORT: the place (station name and address)", "It goes at the top of the report. Empty is allowed.", export)
         self._rows_at = 0.0 if any(pyxel.btnp(k) for k in (pyxel.KEY_R, pyxel.KEY_X, pyxel.KEY_U)) else self._rows_at
+
+    def _open_on_map(self, pyxel, mac, suspect, est) -> None:
+        """[M] on the suspects screen: a marker on the estimated spot, the map centred on it at a
+        zoom that shows the whole confidence radius, the radius drawn, and this screen closed so
+        the map is in view. The maths is in _bristle/mapfocus.py; the game is reached through
+        the host adapter."""
+        from plugins._bristle import mapfocus, skimmer
+        name = "POSSIBLE SKIMMER " + (suspect.name or skimmer.colon(mac))
+        if mac not in self._marked:                # one marker per suspect, however often it is opened
+            self._marked.add(mac)
+            self.host.marker("bt", est.lat, est.lon, skimmer.colon(mac), name,
+                             suspect.points[-1][3] if suspect.points else -90)
+        view = self.host.map_view()
+        zoom = None if view is None else mapfocus.pick_zoom(view["spans"], est.lat, est.radius_m,
+                                                            view["width"], view["map_h"])
+        if not self.host.map_focus(est.lat, est.lon, zoom):
+            self._say("Marked on the map at %.6f, %.6f (within about %d m). Close this screen to see it."
+                      % (est.lat, est.lon, round(est.radius_m)))
+            return
+        self._focus = mapfocus.Focus(est.lat, est.lon, est.radius_m, name, mac)
+        self._close(pyxel)
+        self.msg("[BRISTLE] Map centred on the estimated spot, within about %d m. ESC or an arrow key: back to you"
+                 % round(est.radius_m))
+
+    def _focus_keys(self, pyxel) -> None:
+        """While the map is held on a suspect: ESC or an arrow key lets it follow you again."""
+        if pyxel.btnp(pyxel.KEY_ESCAPE):
+            self.app._esc_consumed_frame = pyxel.frame_count
+        elif not any(pyxel.btnp(key) for key in (pyxel.KEY_UP, pyxel.KEY_DOWN, pyxel.KEY_LEFT, pyxel.KEY_RIGHT)):
+            return
+        self._focus = None
+        self.host.map_release()
 
     def _hunt_keys(self, pyxel) -> None:
         if pyxel.btnp(pyxel.KEY_ESCAPE):
@@ -583,3 +616,10 @@ class BristleNodes(PluginBase):
             screen.draw_hud(pyxel, self.service, self.ingest, term_y)
         if self._popup is not None:
             screen_more.draw_popup(pyxel, w, hud_top, self._popup[0])
+        if self._focus is not None:
+            from plugins._bristle import mapfocus
+            view, focus = self.host.map_view(), self._focus
+            if view is not None:
+                points = mapfocus.outline(view["to_screen"], focus.lat, focus.lon, focus.radius_m)
+                screen_more.draw_focus(pyxel, w, hud_top, term_y, mapfocus.segments(points, hud_top, term_y, 0, w),
+                                       view["to_screen"](focus.lat, focus.lon), mapfocus.label_text(focus))

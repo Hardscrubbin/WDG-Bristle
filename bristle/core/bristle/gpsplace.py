@@ -1,6 +1,6 @@
 """Place finds by time using the core's GPS track.
 
-Feed it fresh, measured fixes (WDG v3's wardrive_sample path). Each find carries its node timestamp;
+Feed it fresh, measured fixes (the game's wardrive_sample path). Each find carries its node timestamp;
 `place(t)` returns the position at that time, interpolated between the two surrounding fixes when
 they're close enough, else the nearest fix within the allowed age, else None (hold or drop the find,
 following WDG's Kismet-plugin rules). Never returns 0,0 or an invalid coordinate.

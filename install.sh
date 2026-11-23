@@ -19,9 +19,13 @@
 #                                 let the desktop icon start the game without
 #                                 asking for the sudo password (adds one sudoers
 #                                 rule for this folder's Python only)
+#   ./install.sh --from=FOLDER    first install only: copy your data from this
+#                                 earlier install instead of the one it finds
 #
 # What it keeps: loot/, maps/, secrets.conf, whitelist.json are never touched
 # unless you pass --clean. Code is overwritten freely.
+# First install: your data is COPIED from an earlier install found under your
+# home folder. That folder is never changed. Later runs leave your data alone.
 # What it changes outside this folder (each one is said out loud when it happens):
 #   apt packages; /etc/default/gpsd (backed up first); a modprobe blacklist for
 #   the RTL-SDR's TV driver; your user's groups; the menu + desktop entry.
@@ -45,6 +49,7 @@ DO_APT=1
 DO_GPSD=1
 RAIL_FLAG=""
 PASSWORDLESS=0
+FROM_DIR=""
 DESKTOP_ID="wdg-bristle"
 DISPLAY_NAME="WDG-Bristle"
 
@@ -55,7 +60,8 @@ for arg in "$@"; do
         --no-gpsd) DO_GPSD=0 ;;
         --no-rails) RAIL_FLAG="--no-rails" ;;
         --passwordless-launch) PASSWORDLESS=1 ;;
-        -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --from=*) FROM_DIR="${arg#--from=}" ;;
+        -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $arg   (try ./install.sh --help)"; exit 2 ;;
     esac
 done
@@ -125,35 +131,23 @@ if [ "$CLEAN" -eq 1 ]; then
         ok "Nothing wiped."
     fi
 else
-    # [bristle] First install of WDG-Bristle next to an install under the old name: COPY your data
-    # over. Nothing is moved or deleted; the old folder stays exactly as it is, as the backup.
-    if [ -n "$OLD_INSTALL_NAME" ] && [ ! -e "$DIR/loot" ] && [ ! -e "$DIR/secrets.conf" ]; then
-        OLD_DIR=""
-        for candidate in "$(dirname "$DIR")/$OLD_INSTALL_NAME" "$HOME/$OLD_INSTALL_NAME"; do
-            if [ "$candidate" != "$DIR" ] && { [ -d "$candidate/loot" ] || [ -f "$candidate/secrets.conf" ]; }; then
-                OLD_DIR="$candidate"; break
-            fi
-        done
-        if [ -n "$OLD_DIR" ]; then
-            info "Found your earlier install: $OLD_DIR"
-            COPY_FAILED=0
-            # loot, maps, keys, the whitelist, device backups, the Kismet adapter choice and the
-            # record of what has already been uploaded
-            for item in loot maps secrets.conf whitelist.json firmware_cache kismet_adapters.json \
-                        plugins/.wardrive_state.json plugins/.wardrive_uploaded.json; do
-                if [ -e "$OLD_DIR/$item" ] && [ ! -e "$DIR/$item" ]; then
-                    if sudo cp -a -- "$OLD_DIR/$item" "$DIR/$item"; then
-                        ok "copied over: $item"
-                    else
-                        fail "could not copy $item from $OLD_DIR (it is untouched there)"
-                        COPY_FAILED=1
-                    fi
-                fi
-            done
-            if [ "$COPY_FAILED" -eq 0 ]; then
-                ok "Your loot, keys and settings are here now. $OLD_DIR was not changed: keep it as the backup."
-            fi
+    # [bristle] First install of WDG-Bristle (no loot/ and no secrets.conf here yet): look for an
+    # earlier install in any folder under your home whose name is one of the old install names
+    # (watchdogs/legacy_names.py), and COPY your data over from the one with the newest data.
+    # Nothing is moved, changed or deleted there: the old folder stays as it is, as the backup.
+    # tools/install_helper.py does the looking and the copying, lists what it found and what it
+    # copied, and writes the same list to copied-from-earlier-install.txt in this folder.
+    if [ ! -e "$DIR/loot" ] && [ ! -e "$DIR/secrets.conf" ]; then
+        if [ -n "$FROM_DIR" ]; then
+            sudo python3 "$DIR/tools/install_helper.py" bring-data "$DIR" "$HOME" "--from=$FROM_DIR"
+        else
+            sudo python3 "$DIR/tools/install_helper.py" bring-data "$DIR" "$HOME"
         fi
+        if [ $? -ne 0 ]; then
+            fail "Your earlier data was not copied completely (see the lines above). Nothing was changed in the old folder."
+        fi
+    elif [ -n "$FROM_DIR" ]; then
+        warn "--from is only used on a first install. This folder already has data: nothing was copied."
     fi
     for item in loot maps secrets.conf whitelist.json; do
         if [ -e "$DIR/$item" ]; then ok "kept: $item"; fi
@@ -195,7 +189,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-step "4/9  Game environment (upstream's setup.sh: venv, Python packages, dump1090, AIO tools)"
+step "4/9  Game environment (the game's own setup.sh: venv, Python packages, dump1090, AIO tools)"
 # -----------------------------------------------------------------------------
 chmod +x "$DIR/setup.sh" "$DIR/run.sh" "$DIR/watchdogs-launcher" "$DIR/selftest.sh" "$DIR/uninstall.sh" 2>/dev/null || true
 if bash "$DIR/setup.sh"; then

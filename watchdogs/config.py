@@ -153,16 +153,16 @@ CMD_SCAN_AIRTAG = "scan_airtag"
 # Auto-update check (Watch Dogs Go)
 APP_UPDATE_URL = "https://raw.githubusercontent.com/LOCOSP/esp32-watch-dogs/master/watchdogs/__init__.py"
 
-# Firmware discovery uses this fork's published C5/SOLO manifests and app
-# images. Firmware versions come from the manifest, not the game release tag.
-# The upstream branch is retained only for isolated legacy safety fixtures;
-# production uses the upstream client and never a stock or Piglet fallback.
+# Firmware discovery uses this build's own C5/SOLO manifest and application
+# image. Firmware versions come from the manifest, not the game release tag.
+# The stock (LOCOSP) download branch is kept only for isolated legacy safety
+# fixtures; production uses the C5/SOLO path and never a stock or Piglet fallback.
 UPSTREAM_FIRMWARE_ENABLED = False
 # [bristle] No online firmware source: the C5/SOLO image is the one shipped in firmware/, checked
 # against the SHA256 pinned in c5_firmware.py. The setting exists and is empty; an online source
 # would need its own verified identity before it could be switched on (docs/REBRAND.md).
 FIRMWARE_RELEASE_URL = ""
-# Retained transport profiles. The upstream installer supports only its approved
+# Retained transport profiles. The C5/SOLO installer supports only its approved
 # XIAO-C5 target and writes the verified application image, never these offsets.
 FLASH_CHIP = "esp32c5"
 FLASH_MODE = "dio"
@@ -264,7 +264,7 @@ WPASEC_KEY = _secret("WDG_WPASEC_KEY", "JANOS_WPASEC_KEY")
 # just above GPS_DEVICE) stay correct.
 
 # Survival / crisis offline services (local, running on the uConsole itself).
-# [merge] Carried over from upstream edition so SYSTEM > Survival features keep working.
+# [merge] Carried over from the base edition so SYSTEM > Survival features keep working.
 # Kiwix serves offline Wikipedia + survival ZIMs on :8080; the ctOS PMTiles map
 # server runs on :8082; Organic Maps is an offline-navigation flatpak app.
 SURVIVAL_BROWSER = "chromium"

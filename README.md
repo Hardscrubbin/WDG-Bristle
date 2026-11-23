@@ -9,19 +9,19 @@ uConsole.
 artwork and most of what you see are LOCOSP's work, under LOCOSP's [LICENSE](LICENSE) (MIT). This
 repository is a fork of it. Other credits are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-> **Status.** WDG-Bristle 1.1. Early. The Bristle Nodes firmware and everything it adds to the game
+> **Status.** WDG-Bristle 1.2. Early. The Bristle Nodes firmware and everything it adds to the game
 > have been compiled and unit-tested, and have **not yet run on real boards**: the bench list in
 > [`bristle/docs/BENCH_TESTS.md`](bristle/docs/BENCH_TESTS.md) is still to be worked through. Expect
 > rough edges, and do not rely on them yet.
 
 ## What it does
 
-The full list, with what's new in WDG-Bristle and where everything comes from, is in
-**[FEATURES.md](FEATURES.md)**.
+The full list, with what came in which release, is in [FEATURES.md](FEATURES.md).
 
 - **Kismet wardriving.** Start and stop Kismet from the game. Networks and Bluetooth devices go
-  into the game's loot (WiGLE-format CSV), XP and map, placed with the uConsole's GPS. One or two
-  Wi-Fi adapters, split by band. Uploads to WiGLE and WDGWars.
+  into the game's loot (WiGLE-format CSV), XP and map, placed with the uConsole's GPS. Any number
+  of Wi-Fi adapters, with the channels split between them; a card can be locked to one channel.
+  Uploads to WiGLE and WDGWars.
 - **Dual GPS through gpsd.** An on-board receiver and a USB receiver at the same time, with a
   health screen that shows which one is in use and why.
 - **ADS-B.** Aircraft tracks and coverage from an RTL-SDR, with KML export.
@@ -42,8 +42,8 @@ The full list, with what's new in WDG-Bristle and where everything comes from, i
   signatures file names its published source: [`bristle/docs/SIGNATURES.md`](bristle/docs/SIGNATURES.md).
 - **Possible skimmers, listening only.** Bluetooth serial modules that look factory-fresh (the
   signs found on card skimmers pulled out of gas pumps) are scored, logged with a position, and can
-  be walked up to with a signal meter. Such a device is never connected to, paired with or asked
-  for anything. It finds some
+  be walked up to with a signal meter or opened on the map with its confidence radius. Such a
+  device is never connected to, paired with or asked for anything. It finds some
   skimmers and misses others (a renamed module, a cellular one, one with no radio): a hit is a
   possible skimmer, and no hit never means a pump is safe.
 
@@ -56,7 +56,10 @@ You can use WDG-Bristle just for Kismet wardriving. Bristle Nodes, alerts and th
 2. **TAB > PLUGINS > Kismet: Configure & Start** opens the adapter picker:
    - UP/DOWN to move, SPACE/ENTER to tick a card
    - M for monitor mode
-   - S to turn the channel split on or off (two cards: one takes 2.4 GHz, the other 5/6 GHz)
+   - LEFT/RIGHT to lock a card to one channel, L to let it hop again
+   - S to turn the channel split on or off. With the split on, each card gets its own share of
+     the channels: two cards take 2.4 / 5-6 GHz, three take 2.4 / 5 GHz low / 5 GHz high, and a
+     fourth takes 6 GHz if it can. The picker shows what each card gets.
    - R to rescan, ESC to cancel
 3. Networks and Bluetooth devices go into your loot (WiGLE-format CSV), XP and map, placed with the
    uConsole's GPS.
@@ -101,7 +104,9 @@ cd ~/wdg-bristle
 
 `install.sh` asks for `sudo` where it needs it and says what it changes: system packages, the
 game's Python environment, gpsd's device list, your user's groups, and a desktop entry. Your data
-(`loot/`, `maps/`, `secrets.conf`, `whitelist.json`) is never touched by a reinstall.
+(`loot/`, `maps/`, `secrets.conf`, `whitelist.json`) is never touched by a reinstall. On a first
+install it looks for an earlier install under your home folder and copies your data over from it;
+the old folder is only read.
 
 Then put your keys in `secrets.conf` (WiGLE, WDGWars, map tiles) and start the game from the
 desktop icon. The full guide, with troubleshooting, is [INSTALL_WDG_BRISTLE.md](INSTALL_WDG_BRISTLE.md).

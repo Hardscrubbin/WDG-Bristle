@@ -3,7 +3,7 @@
 Every grey block can be copied and pasted whole into a terminal on the uConsole.
 Run everything as your normal user. The installer asks for `sudo` itself.
 
-**What this is.** WDG-Bristle 1.1: Watch Dogs Go (base 0.9.21.3) with the Kismet wardriving bridge,
+**What this is.** WDG-Bristle 1.2: Watch Dogs Go (base 0.9.21.3) with the Kismet wardriving bridge,
 dual-GPS through gpsd with a health screen, a Hardware Check screen, Kismet on two Wi-Fi adapters,
 ADS-B tracks + KML, 433 capture to Flipper `.sub`, 433 Hunter, loot backup/restore, session log,
 WDGWars pairing + status, an offline-basemap layer, and **Bristle Nodes**: a fleet of ESP32-C5
@@ -12,16 +12,15 @@ firmware updates, nearby alerts and a list of possible skimmers (section 9).
 
 **What has been proven, and what has not.** The build this one is made from passed its self-test
 and its installer on the uConsole. WDG-Bristle itself (the rename, the Bristle Nodes plugin and
-everything new in 1.1) has only been built and unit-tested on a Windows PC: nothing in it has run
-on the uConsole yet, and the node firmware has not run on a board yet. The PC cannot run the shell
-scripts at all (it has no bash). The simulation scenarios were not run for this build; use
-`./selftest.sh --tests-only`. The bench list that proves it is `bristle/docs/BENCH_TESTS.md`.
+everything new in 1.1 and 1.2) has only been built and unit-tested on a Windows PC: nothing in it has
+run on the uConsole yet, and the node firmware has not run on a board yet. The PC cannot run the shell
+scripts at all (it has no bash). Use `./selftest.sh --tests-only` for the unit tests. The bench list that proves it is `bristle/docs/BENCH_TESTS.md`.
 
-**Coming from the earlier install?** Unzip this next to it and run `./install.sh`.
-The installer copies your loot, maps, `secrets.conf`, `whitelist.json`, firmware cache, Kismet adapter
-choice and upload record into
-`~/wdg-bristle`, removes the old desktop icon, and leaves the old folder exactly as it is: that
-folder is your rollback. Updates are by hand from now on: a new `wdg-bristle.zip`, unzipped over
+**Coming from an earlier install?** Unzip this anywhere and run `./install.sh`. On a first install
+it looks for earlier installs in every folder under your home, copies your loot, maps, `secrets.conf`,
+`whitelist.json`, firmware cache, Kismet adapter choice and upload record from the one with the
+newest data into `~/wdg-bristle`, lists what it found and what it copied, removes the old desktop
+icon, and leaves the old folder exactly as it is: that folder is your rollback. Updates are by hand from now on: a new `wdg-bristle.zip`, unzipped over
 this folder. SYSTEM > Update Game only says so; it installs nothing.
 
 ---
@@ -80,9 +79,10 @@ What it does, in order:
 1. Prints a **found / not found** table of your hardware (board CM4/CM5, AIO v2 rails, both GPS
    receivers, RTL-SDR, LoRa, Wi-Fi adapters, Bluetooth, ESP32). For this look it switches the AIO
    GPS / SDR / USB rails on and puts them back, and stops gpsd for a few seconds.
-2. Keeps your data (`loot/`, `maps/`, `secrets.conf`, `whitelist.json`).
+2. Keeps your data (`loot/`, `maps/`, `secrets.conf`, `whitelist.json`). On a first install it brings
+   your data over from an earlier install instead (see "Bring an earlier install's loot and XP over").
 3. Installs missing packages: `kismet gpsd gpsd-clients rtl-sdr rtl-433` and helpers.
-4. Runs upstream's `setup.sh`: Python venv in `.venv`, Python packages, dump1090 (built from source if
+4. Runs the game's own `setup.sh`: Python venv in `.venv`, Python packages, dump1090 (built from source if
    missing), HackerGadgets `aiov2_ctl`. The first run takes several minutes.
 5. Adds you to the `dialout`, `kismet`, `gpio`... groups that exist.
 6. Points **gpsd** at the GPS receivers it actually read NMEA from, with `-n`. The old
@@ -126,15 +126,17 @@ The values below are placeholders, not keys.
 You can skip `WARDRIVE_API_KEY` and pair instead: in game, **PLUGINS > WDGWars: Pair / Status > P**,
 then type the code shown at the portal. The key is saved for you and never displayed.
 
-Copy your keys from v2 instead of retyping them (this only reads v2's file):
+If the installer brought your data over from an earlier install, your keys are already here. To
+copy them from another install by hand instead of retyping them (this only reads the old file; put
+that install's folder in place of `OLD-FOLDER`):
 
 ```bash
-grep -E '^(WDG_|WARDRIVE_|STADIA_|MAPTILER_|TILE_|DISABLED_)' ~/wdg-builds/wdg-bristle-v2/secrets.conf >> ~/wdg-bristle/secrets.conf && chmod 600 ~/wdg-bristle/secrets.conf
+grep -E '^(WDG_|WARDRIVE_|STADIA_|MAPTILER_|TILE_|DISABLED_)' OLD-FOLDER/secrets.conf >> ~/wdg-bristle/secrets.conf && chmod 600 ~/wdg-bristle/secrets.conf
 ```
 
 ## 5. Kismet login (once per machine)
 
-Skip this if Kismet already has a login on this uConsole (v2 used the same one).
+Skip this if Kismet already has a login on this uConsole (an earlier install used the same one).
 
 ```bash
 kismet
@@ -164,6 +166,7 @@ and do not contact the real one; you do not need to stop anything first.
 |---|---|
 | `./selftest.sh --tests-only` | The test suite alone, no simulation scenarios (use this for now) |
 
+<!-- private:end -->
 
 If it ends in `RESULT: FAIL`, send me the log file it names (`~/.watchdogs/selftest/selftest-<time>.log`).
 The summary table is at the very top of that file and again at the bottom. Lines saying
@@ -303,36 +306,51 @@ for p in 27 16 7 23; do pinctrl get $p; done
 at start when gpsd owns the GP-02, and the others from SYSTEM. Hardware Check can toggle GPS / SDR /
 USB with **G / S / U**. By hand: `sudo pinctrl set 27 op dh` (on), `sudo pinctrl set 27 op dl` (off).
 
-### Bring v2's loot and XP over (copy, never move)
+### Bring an earlier install's loot and XP over (copy, never move)
 
-v2 stays exactly as it is. Close both games first.
+**The installer does this by itself on a first install** (a folder with no `loot/` and no
+`secrets.conf` yet). It looks in every folder under your home, up to four folders deep, for a folder
+with the name of an earlier install that holds a `loot/` folder or a `secrets.conf`, and it also looks
+next to this folder. It prints every one it finds, with the date of its newest data, copies from the
+one with the newest data, and prints each thing it copied:
 
-Make one archive of v2's data. This reads v2's folder and writes only into your home folder:
+- `loot/`, `maps/`, `secrets.conf`, `whitelist.json`, `firmware_cache/`, `kismet_adapters.json` and the
+  two upload-record files in `plugins/`.
+- The old folder is only read. Nothing in it is moved, changed or deleted: it is your rollback.
+- Something that is already in this folder is never overwritten.
+- The same list is kept in `copied-from-earlier-install.txt` in this folder.
+
+If it found more than one, the others are listed as "Not used". Data from two installs is never mixed.
+To start from a different one, or from a folder with any other name (a copy on a USB stick, say),
+unzip a fresh `wdg-bristle` folder and name it:
 
 ```bash
-cd ~/wdg-builds/wdg-bristle-v2 && sudo tar czf ~/wdg-v2-backup-$(date +%F_%H-%M-%S).tar.gz $(ls -d loot whitelist.json secrets.conf 2>/dev/null) && sudo chown $USER ~/wdg-v2-backup-*.tar.gz && chmod 600 ~/wdg-v2-backup-*.tar.gz
+cd ~/wdg-bristle && ./install.sh --from=OLD-FOLDER
 ```
 
-Then in v3: **PLUGINS > Loot: Backup / Restore**, select the `wdg-v2-backup-...` file, press **R**,
-check the XP and session count it shows, press **Y**, quit, start again. v3's previous data is kept
-as `loot.pre-restore-<time>` (the newest 2 such copies are kept; older ones are deleted at a restore).
-The archive contains v2's `secrets.conf`, so it replaces v3's keys with v2's.
-
-Optional extras, also copies:
+**By hand, through a backup file**, if you would rather choose what comes over. Close both games.
+Make one archive of the old install's data (this reads the old folder and writes only into your home
+folder; put that install's folder in place of `OLD-FOLDER`):
 
 ```bash
-cp -an ~/wdg-builds/wdg-bristle-v2/maps/. ~/wdg-bristle/maps/ 2>/dev/null; cp -n ~/wdg-builds/wdg-bristle-v2/kismet_adapters.json ~/wdg-bristle/ 2>/dev/null; ls ~/wdg-bristle
+cd OLD-FOLDER && sudo tar czf ~/wdg-old-backup-$(date +%F_%H-%M-%S).tar.gz $(ls -d loot whitelist.json secrets.conf 2>/dev/null) && sudo chown $USER ~/wdg-old-backup-*.tar.gz && chmod 600 ~/wdg-old-backup-*.tar.gz
 ```
+
+Then in WDG-Bristle: **PLUGINS > Loot: Backup / Restore**, select the `wdg-old-backup-...` file, press
+**R**, check the XP and session count it shows, press **Y**, quit, start again. The data WDG-Bristle had
+before is kept as `loot.pre-restore-<time>` (the newest 2 such copies are kept; older ones are deleted
+at a restore). The archive contains the old `secrets.conf`, so it replaces the keys here with the old
+ones.
 
 `~/.watchdogs` (radio and mesh settings, logs) is shared by every build already.
 
-### Roll back to v2
+### Roll back to the earlier install
 
-v2 was not touched. Click its own icon, or `cd ~/wdg-builds/wdg-bristle-v2 && sudo ./run.sh`.
+The earlier install was not touched. Click its own icon, or run its own `run.sh` from its folder.
 
-One thing changed system-wide: gpsd now serves **two** receivers. v2 reads gpsd but does not tell
-receivers apart, so with both attached its position can jump between them. For v2, either unplug one
-receiver, or put the old gpsd settings back:
+One thing changed system-wide: gpsd now serves **two** receivers. A build from before the two-receiver
+support reads gpsd but does not tell receivers apart, so with both attached its position can jump
+between them. For such a build, either unplug one receiver, or put the old gpsd settings back:
 
 ```bash
 ls /etc/default/gpsd.wdg-backup-*
@@ -342,9 +360,8 @@ ls /etc/default/gpsd.wdg-backup-*
 sudo cp /etc/default/gpsd.wdg-backup-REPLACE-WITH-THE-DATE /etc/default/gpsd && sudo systemctl restart gpsd.socket gpsd
 ```
 
-Running `./install.sh` in the v3 folder sets gpsd up for two receivers again.
-
-### Remove v3
+Running `./install.sh` in the WDG-Bristle folder sets gpsd up for two receivers again.
+### Remove WDG-Bristle
 
 ```bash
 cd ~/wdg-bristle && ./uninstall.sh
@@ -357,14 +374,16 @@ loot, maps and keys after you type `DELETE`.
 
 ## Notes
 
-- **Do not use SYSTEM > Update Game to install upstream's release over this build.** v3 shows update notices
-  only; installing upstream's release would remove the v3 additions. Update by unzipping a new v3 zip.
+- **Updates are by hand.** SYSTEM > Update Game installs nothing in this build: it says so and stops.
+  Update by unzipping a new `wdg-bristle.zip` over this folder (or `git pull`), then `./install.sh`.
 - **Offline world basemap.** The drawing code is in, the map data is not: WDGoNG's `basemap.mbtiles`
   (about 29 MB) was not in the WDGoNG archive this build was made from. If you have a WDGoNG install,
   copy `wdgong_ui/assets/map/basemap.mbtiles` to `~/wdg-bristle/maps/basemap.mbtiles` and restart.
   Without it the coastline is drawn as before. It has only been drawn with test tiles so far.
-- **ESP32-C5.** Plug it in and Hardware Check shows it. upstream's own Wi-Fi/BLE Sniff and WARDRIVING SOLO
-  need JanOS / upstream-SOLO firmware on it. v3 never flashes anything by itself.
+- **ESP32-C5 (the game's own companion board, not a Bristle node).** Plug it in and Hardware Check
+  shows it. The game's Wi-Fi/BLE Sniff and WARDRIVING SOLO need JanOS with the SOLO interface on it.
+  Nothing is ever flashed by itself: SYSTEM > Firmware writes only when you start it there. If a write
+  is cut off, that screen says what state the board is in and offers to finish it (**F**).
 - **Not built** (ask if you want them): Cluster Wardrive (needs Marauder V8 nodes, a fleet key and
   newer bridge firmware), the EXTRAS hub and sandbox, host Wi-Fi scanning (`host_wifi.py`: Kismet
   owns your adapters), `radio_arbiter` / `radio_detect`.

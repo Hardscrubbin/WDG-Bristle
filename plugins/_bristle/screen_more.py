@@ -14,7 +14,7 @@ from . import alerts, flasher, skimmer
 from .screen import C_BAR, C_BG, C_BORDER, C_DIM, C_ERR, C_OK, C_TEXT, C_TITLE, C_WARN, FONT_W, MAX_CHARS, clip, duration
 
 ALERT_KEYS = "[UP/DOWN] select  [ENTER] switch this kind on/off  [O] sound on/off  [ESC] back"
-SUSPECT_KEYS_1 = "[H] hunt  [M] mark on map  [R] reported  [X] false alarm (ignore it)  [N] notes  [P] place  [E] export report"
+SUSPECT_KEYS_1 = "[H] hunt  [M] open on map  [R] reported  [X] false alarm (ignore it)  [N] notes  [P] place  [E] export report"
 SUSPECT_KEYS_2 = "[U] undo a mark  [?] what this can and cannot find  [UP/DOWN] select  [ESC] back"
 HUNT_KEYS = "[ESC] end the hunt        Listening only: no connecting, no pairing, nothing asked of the device."
 SUSPECT_HEADER = "%-5s %-18s %-17s %-11s %-11s %5s %-26s %-9s %s" % (
@@ -233,6 +233,23 @@ def draw_popup(pyxel, w, hud_top, alert) -> None:
     pyxel.rectb(x, y, width, height, C_ERR)
     for index, line in enumerate(lines):
         pyxel.text(x + 6, y + 4 + index * 9, line, C_ERR if index == 0 else C_TEXT)
+
+
+def draw_focus(pyxel, w, hud_top, term_y, lines, centre, text) -> None:
+    """A suspect opened on the map: its confidence radius (``lines``: [(x1, y1, x2, y2)], already
+    cut to the map area by mapfocus.segments), a small cross on the estimated spot, and one line
+    of text bottom right, above the terminal."""
+    for x1, y1, x2, y2 in lines:
+        pyxel.line(x1, y1, x2, y2, C_ERR)
+    if centre is not None and hud_top + 4 <= centre[1] <= term_y - 4 and 4 <= centre[0] <= w - 4:
+        pyxel.line(centre[0] - 3, centre[1], centre[0] + 3, centre[1], C_WARN)
+        pyxel.line(centre[0], centre[1] - 3, centre[0], centre[1] + 3, C_WARN)
+    text = clip(text, 64)
+    width = len(text) * FONT_W + 6
+    x, y = w - width - 3, term_y - 13
+    pyxel.rect(x, y, width, 11, C_BG)
+    pyxel.rectb(x, y, width, 11, C_ERR)
+    pyxel.text(x + 3, y + 2, text, C_TEXT)
 
 
 def dialog_lines(dialog: dict) -> list:

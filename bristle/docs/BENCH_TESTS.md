@@ -3,7 +3,7 @@
 Real boards only. **Nothing below has run on a board or on the uConsole: every "expect" is what
 the code is written to do, not something that was seen.** Write what you saw into the tables.
 
-Firmware: `firmware/releases/v1-build4-dev/`. Game: `WDG Main\dist\wdg-bristle.zip` (WDG-Bristle 1.1).
+Firmware: `firmware/releases/v1-build4-dev/`. Game: `WDG Main\dist\wdg-bristle.zip` (WDG-Bristle 1.2).
 
 ## The order
 
@@ -12,7 +12,7 @@ The checkpoints are in the order that wastes the least time, not in letter order
 | # | Checkpoint | What it proves | Time |
 |---|---|---|---|
 | 1 | **A** | the firmware starts, its self-test passes, the board's LED and BOOT pin are right | 20 min |
-| 2 | **R** | WDG-Bristle 1.1 installs over your data and everything from before still works | 30 min |
+| 2 | **R** | WDG-Bristle 1.2 installs, brings your data over from an earlier install, and everything from before still works; the Kismet channel lock and split (R12 to R15) | 45 min |
 | 3 | **B** | nodes over USB in the game: adopt, scan, finds in loot and on the map | 45 min |
 | 4 | **F1** | the game flashes a blank board | 10 min |
 | 5 | **D** | the ESP-NOW bridge, in the house, then in the car | 1 h |
@@ -65,7 +65,7 @@ is not needed for this list.)
 
 ---
 
-## 2. Checkpoint R: WDG-Bristle 1.1 installed from the zip
+## 2. Checkpoint R: WDG-Bristle 1.2 installed from the zip
 
 **Plug in:** nothing new. Your current install is not changed by any step here: it stays as the
 rollback.
@@ -80,9 +80,9 @@ unzip -o wdg-bristle.zip && cd ~/wdg-bristle && ./install.sh
 | # | Do | Expect |
 |---|---|---|
 | R1 | `sha256sum wdg-bristle.zip` | The value I gave you in the report. |
-| R2 | `./install.sh` | Step "2/9 Your data": `Found your earlier install: <its folder>`, then `copied over:` for loot, maps, secrets.conf and whitelist.json, then `Your loot, keys and settings are here now.` (On a reinstall over WDG-Bristle 1.0 nothing is copied: the data is already there.) Step 8: the old icon is removed if there was one. |
+| R2 | `./install.sh` in a freshly unzipped folder (no `loot/`, no `secrets.conf` in it yet) | Step "2/9 Your data": `Earlier install(s) found: n`, one line per earlier install with the date of its newest data and what it holds (every earlier install under your home, wherever it is, not only the one next to this folder), then `Copying from <folder> (the one with the newest data)`, a `copied:` line for each of loot, maps, secrets.conf, whitelist.json and the rest, and `<folder> was not changed: keep it as the backup`. Any other earlier install is listed as `Not used`. The same lines are in `copied-from-earlier-install.txt`. In the old folder nothing has changed (`ls -la` it: same files, same dates). Step 8: the old icon is removed if there was one. On a reinstall over an existing WDG-Bristle folder nothing is looked for and nothing is copied. **Tell me if an earlier install of yours was not found, and where it is.** |
 | R3 | `./selftest.sh --tests-only` | `RESULT: PASS`. |
-| R4 | Look at the desktop. Start the game from the icon. | One icon, **WDG-Bristle**. Window title `WDG-Bristle`. Intro: `by LOCOSP`, then `WDG-Bristle 1.1`. Terminal: `[SYS] WDG-Bristle 1.1 (base 0.9.21.3)`. |
+| R4 | Look at the desktop. Start the game from the icon. | One icon, **WDG-Bristle**. Window title `WDG-Bristle`. Intro: `by LOCOSP`, then `WDG-Bristle 1.2`. Terminal: `[SYS] WDG-Bristle 1.2 (base 0.9.21.3)`. |
 | R5 | Look at your data. | Level and XP as before; old sessions in the loot list; WDGWars pairing still valid; WiGLE key still accepted. |
 | R6 | SYSTEM > Update Game. | `Updates: managed manually`. No GitHub source; nothing is fetched. |
 | R7 | SYSTEM > Firmware C5/SOLO with the network off, press R. Do not flash. | `Approved C5 package: JanOS 1.7.0 + SOLO`, `Source: shipped with this build. Updates: managed manually`. |
@@ -90,13 +90,18 @@ unzip -o wdg-bristle.zip && cd ~/wdg-bristle && ./install.sh
 | R9 | A Kismet wardrive (start, finds, stop); GPS: Health; ADS-B; a WiGLE upload; a WDGWars sync. | As before. |
 | R10 | With your JanOS board plugged in and no node: start the game. | It starts about 1.3 s later than before (the game listens on the port once to see whether the board is a Bristle board) and connects to the JanOS board as before. Nothing is written to the port for that. |
 | R11 | PLUGINS menu. | Three new entries: `Bristle: Nodes`, `Bristle: Alerts`, `Skimmer suspects`. Each opens; ESC closes it. |
+| R12 | Kismet adapter picker with your Wi-Fi cards ticked. Highlight one card, press **RIGHT** a few times, then **LEFT**, then **L**. | The row shows `LOCKED: channel n`, stepping through that card's own channels; **L** takes the lock off. Under the list, `CHANNEL PLAN` has one line per ticked card: its bands and channels, or `locked on channel n`. With two cards: 2.4 GHz on one, 5/6 GHz on the other, as before. With three: 2.4 GHz, 5 GHz low, 5 GHz high. |
+| R13 | Lock one card to channel 6 and start the wardrive. Open Kismet's own web page (Data Sources). Stop, open the picker again. | Terminal: `<card> is locked to channel 6 (no hopping)`, then `Channels split between the adapters -- ...; <card> stays on channel 6`. In Kismet that source sits on channel 6 and does not hop; the others hop their share, without channel 6. PLUGINS > Hardware Check shows the same under KISMET. The picker opens with the lock still set (also after a restart of the game, and after unplugging and replugging the card). **This is the first time a lock meets a real card and a real Kismet: tell me what Kismet shows.** |
+| R14 | With a card locked and the nodes scanning: look at the line under the coverage strip on the Nodes screen. Then unplug the locked card. | `Kismet stays mostly on 6: nodes give those channels the shortest dwell`. After the unplug: the other cards get channel 6 back (`Channels split ...` again in the terminal, no `stays on channel 6`), and within about a minute the nodes' line goes back to `Kismet hops N channels evenly`. |
+| R15 | (Optional) Close the game. In `kismet_adapters.json` set `"wifi_locks"` for one card's MAC to a channel it cannot tune (`"100"` for a 2.4 GHz only card). Start, open the picker, start the wardrive. | Picker: `<card>: cannot tune channel 100: it will hop instead`. Terminal at the start: `<card> cannot tune channel 100 -- the lock is dropped for this run and it hops like the others`. The card captures and hops. |
+| R16 | SYSTEM > Firmware C5/SOLO. Do not flash. | The screen as before. No line about an unfinished install (there is none). If you ever see `A FIRMWARE WRITE DID NOT FINISH` there, press **F** and send me the page and the lines it prints in OUTPUT before pressing anything else. |
 
 | Step | Result | Notes |
 |---|---|---|
 | R1 checksum | | |
-| R2 data copied / kept, old folder untouched | | |
+| R2 earlier installs found and listed, data copied, old folder untouched | | |
 | R3 selftest --tests-only PASS | | |
-| R4 one icon; name and 1.1 on window, intro, version line | | |
+| R4 one icon; name and 1.2 on window, intro, version line | | |
 | R5 loot, keys, settings all there | | |
 | R6 Update Game says managed manually | | |
 | R7 firmware window, shipped image, no network | | |
@@ -104,6 +109,11 @@ unzip -o wdg-bristle.zip && cd ~/wdg-bristle && ./install.sh
 | R9 Kismet, both GPS, ADS-B, uploads | | |
 | R10 JanOS board still found; start delay | | |
 | R11 the three Bristle screens open | | |
+| R12 picker: lock keys, the plan per card | | |
+| R13 a locked card under a real Kismet; lock remembered | | |
+| R14 nodes count the locked channel as covered; unplug gives it back | | |
+| R15 a channel the card cannot tune (optional) | | |
+| R16 firmware screen, nothing pending | | |
 
 ---
 
@@ -302,7 +312,7 @@ window sill) where you can drive past and then walk up to it.
 | G7 | Look at the lines under the list. | `Why: default module name HC-05/HC-06 ...`; `Class of Device:` a value, or `not given (this Kismet does not report Class of Device)`. **Tell me which.** |
 | G8 | Drive past again from another direction. | SEEN goes up; the estimated spot moves closer to the real one and its `+-` radius shrinks. |
 | G9 | `head -3 ~/wdg-bristle/loot/skimmers/sightings.csv` | The header and one row per sighting: time, lat, lon, RSSI, who heard it (`Kismet ...` or `node n`), name, address, class, score. |
-| G10 | Select it, **M**. Close the screen. | A marker at the estimated spot on the map. |
+| G10 | Select it, **M**. | The suspects screen closes and the map moves to the estimated spot, zoomed in so the whole confidence radius fits. A red outline shows the radius (wider than tall away from the equator), with a small cross on the spot, a marker, and a line bottom right: `POSSIBLE SKIMMER <name>: within about n m  [ESC] back to you`. Your own figure is drawn where you are, or not at all if that is off the map. **ESC** or an arrow key: the map goes back to you at the zoom it had. **Tell me whether the marker itself shows, and whether the radius is big enough to see.** |
 | G11 | Select it, **H**, and walk toward it with the uConsole. | Far: `n m, head <direction>`. Near: `You are inside the estimated area`. When a radio hears it: the meter fills, the beep gets faster as you get closer, `STRONGEST SO FAR` shows a value with a position. A phone or a BLE stand-in updates every second or so; a Classic module only every several seconds (Kismet's discovery). |
 | G12 | (Optional) `hunt_adapter = hci1` in bristle.conf, restart, hunt again with Kismet running. | `LISTENING WITH` says `hci1 borrowed from Kismet; listening on hci1`, and the BLE stand-in updates faster. After ESC, Kismet's Bluetooth source is capturing again (Kismet's own screen). If it says `no fast listening: ...`, send me that line. |
 | G13 | **ESC** to end the hunt. **N**: type a note. **E**: type the place. | `Report written: .../loot/skimmers/reports/possible-skimmer-<address>-<time>.txt`. `cat` it: place, times, address, name, class, estimated spot, signal readings, your note, and the words "possible" and "not proof". |
@@ -321,7 +331,7 @@ window sill) where you can drive past and then walk up to it.
 | G7 Class of Device given by Kismet? | | |
 | G8 second pass improves the spot | | |
 | G9 sightings.csv | | |
-| G10 marker on the map | | |
+| G10 open on the map: centred, radius drawn, ESC back | | |
 | G11 hunt on foot | | |
 | G12 borrowed adapter (optional) | | |
 | G13 report | | |
@@ -333,7 +343,7 @@ window sill) where you can drive past and then walk up to it.
 
 ## 9. S: a second core (only with a second install)
 
-**Plug in:** nothing special. You need a second WDG-Bristle 1.1 install (another uConsole, or a
+**Plug in:** nothing special. You need a second WDG-Bristle install (another uConsole, or a
 second folder on the same one, run one at a time).
 
 | # | Do | Expect |

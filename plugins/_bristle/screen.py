@@ -82,7 +82,7 @@ def node_rows(service, now_mono=None, now_wall=None) -> list:
         row = dict(kind="node", hwid=rec.hwid, number=rec.number, session=s, pin=rec.pin,
                    name=rec.name or "%s-%d" % (proto.NAME_PREFIX, rec.number))
         if s is None:
-            seen = duration(now_wall - rec.last_seen) + " ago" if rec.last_seen else "never"
+            seen = duration(now_wall - rec.last_seen) if rec.last_seen else "never"   # how long ago: the column is 6 wide
             row.update(text=HEADER_FORMAT % (rec.number, clip(row["name"], 12), "-", "offline",
                                              clip(channels_text(None, rec.pin), 30), "-", "-", "-", "-", "-", "-",
                                              rec.build or "-", clip(seen, 6)), colour=C_DIM)
@@ -141,8 +141,8 @@ HEADER_FORMAT = "%-3s %-12s %-4s %-9s %-30s %6s %5s %4s %4s %7s %5s %4s %6s"
 def totals_text(service, ingest) -> str:
     t = service.fleet.totals()
     c = ingest.counts
-    return clip("Nodes %d/%d online   %s   %d finds/min   saved Wi-Fi %d  BT %d   no GPS %d   waiting %d   "
-                "on nodes %d   dropped on nodes %d" % (
+    return clip("Nodes %d/%d online  %s  %d finds/min  saved Wi-Fi %d  BT %d  no GPS %d  waiting %d  "
+                "on nodes %d  dropped on nodes %d" % (
                     t["online"], t["known"], "SCANNING (session %d)" % t["session"] if t["running"] else "stopped",
                     ingest.per_minute(), c["written_wifi"], c["written_bt"], c["no_gps"] + c["not_saved"],
                     ingest.backlog(), t["backlog"], t["dropped"]))

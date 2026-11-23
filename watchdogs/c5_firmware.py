@@ -1,4 +1,4 @@
-"""upstream-owned JanOS SOLO packages and fail-closed application-only preflight.
+"""This build's JanOS SOLO packages and the fail-closed, application-only preflight.
 
 Metadata/download functions never open a device. USB discovery and ROM reads
 are separate, explicit functions used only by the existing manual installer.

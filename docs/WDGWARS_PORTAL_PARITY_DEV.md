@@ -2,7 +2,7 @@
 
 **Source reviewed:** [LOCOSP/WatchDogsGo @ 7427fbfc](https://github.com/LOCOSP/WatchDogsGo/commit/7427fbfc9b0d62241cb3b03d7845f3328ce14da7) (12 November 2026).
 
-The existing upstream fork already supports signed wardrive upload, badge sync, `GET /api/me`, web login PIN and the familiar Wars Sync user interface. No source-file replacement from upstream was performed: our fork's batch uploads, HMAC, account snapshot, deduplication, retention, shutdown and receipt logic are preserved.
+This build already supports signed wardrive upload, badge sync, `GET /api/me`, web login PIN and the familiar Wars Sync user interface. No source file was replaced with LOCOSP's: this build's batch uploads, HMAC, account snapshot, deduplication, retention, shutdown and receipt logic are preserved.
 
 ## Added API client methods
 
@@ -65,7 +65,7 @@ committed. This does not establish capture rules or create local awards.
 LOCOSP's two additional **outgoing** fields are now implemented in the DEV plugin:
 
 - **User-Agent:** on Linux it is `WatchDogsGo/<version> (uConsole-<6-char-hardware-fingerprint>; Python/<x.y>)`. The six-character suffix is calculated locally from hardware serial / machine ID (with an existing MAC-based fallback). Raw serials and machine IDs are not transmitted. This is a stable, pseudonymous identifier visible to the WDGWars portal; the `WatchDogsGo/` product prefix is retained. Non-Linux builds retain their platform hint.
-- **`game_xp`:** a positive total read from `app.xp` is included only in the signed JSON for nonempty real Wi-Fi/BLE, aircraft or mesh upload batches. It is the **actual in-game total** including any locally earned points; the game does not disclose the code or event history responsible for those points. The upstream portal displays the declared total on the profile, independently of server-side ranked credit. Empty API pings carry no `game_xp`.
+- **`game_xp`:** a positive total read from `app.xp` is included only in the signed JSON for nonempty real Wi-Fi/BLE, aircraft or mesh upload batches. It is the **actual in-game total** including any locally earned points; the game does not disclose the code or event history responsible for those points. The portal displays the declared total on the profile, independently of server-side ranked credit. Empty API pings carry no `game_xp`.
 
 The existing HMAC-SHA256 envelope, account/key selection, deduplication and upload receipts are unchanged. The signed-body batch-size planner accounts for the additional field within its existing 6 MiB limit, and the original input record dictionaries are not mutated. This is *not* an XP award or a new uploader.
 

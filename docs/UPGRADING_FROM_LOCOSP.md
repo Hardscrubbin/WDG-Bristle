@@ -4,7 +4,7 @@
 
 ## What 0.9.18 fixes
 
-LOCOSP's older release uses loot database format **1**. Earlier upstream builds required format **2** and rebuilt a format-1 database from session files, dropping saved XP, badges and other player metadata. That rebuild could recover only part of the XP, or none when the logs were absent.
+LOCOSP's older release uses loot database format **1**. Earlier builds of this edition required format **2** and rebuilt a format-1 database from session files, dropping saved XP, badges and other player metadata. That rebuild could recover only part of the XP, or none when the logs were absent.
 
 Version **0.9.18** upgrades format 1 while keeping the exact saved XP, badges, contacts, discovery ledger, other player metadata and existing session counts. It adds missing counters without granting discovery XP again. Before changing the database, it keeps an exact private copy beside it:
 
@@ -34,7 +34,7 @@ Use the same data argument on later launches, or retain it in your launcher. Do 
 ## Already seeing zero or reduced XP?
 
 - **Old installation still intact:** stop both games and use its data root with 0.9.18 as above. Keep a backup first.
-- **An older upstream build already overwrote the original database:** stop the game and find the intact original database or a backup. Keep the current save too, especially if it contains newer progress. Do not blindly replace it with an older snapshot or add both XP totals together.
+- **An older build of this edition already overwrote the original database:** stop the game and find the intact original database or a backup. Keep the current save too, especially if it contains newer progress. Do not blindly replace it with an older snapshot or add both XP totals together.
 - **No intact save or backup remains:** the exact old XP cannot be guaranteed. Logs omit some awards; the local save and WDGWars server score are different records. This fix prevents further migration loss, but cannot invent already-erased XP.
 
 The `.bak` files contain player data and may include contact locations. Keep them private; do not attach them to a public issue.

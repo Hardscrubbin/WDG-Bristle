@@ -3,7 +3,7 @@
 # Watch Dogs Go - WDG-Bristle : self-test ON THIS MACHINE
 #
 #     ./selftest.sh              the test suite + every simulation scenario
-#     ./selftest.sh --quick      only the v3 tests and the simulations (~3 min)
+#     ./selftest.sh --quick      only this build's own tests and the simulations (~3 min)
 #     ./selftest.sh --soak       also the simulated 8-hour drive (several minutes more)
 #     ./selftest.sh --screens    also redraw the screens into docs/screens/ (needs the desktop)
 #     ./selftest.sh --tests-only the test suite alone (a build without tools/sim always runs this way)

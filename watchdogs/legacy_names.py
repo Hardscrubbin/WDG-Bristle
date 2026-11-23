@@ -29,6 +29,12 @@ RECOVERY_DIR = "c5-recovery"
 OLD_INSTALL_NAME = "wdg-" + _TAG + "-v3"                                  # its install folder
 OLD_DESKTOP_ID = OLD_INSTALL_NAME + "-max"                                # its menu entry and desktop icon
 OLD_INSTALL_MARK = "# managed by " + OLD_INSTALL_NAME + " install.sh"     # its marker in system files
+# Every folder name an earlier install of this build went by, newest build first. The installer
+# looks for folders with these names under the user's home on a first install (tools/install_helper.py,
+# "bring-data") and COPIES the player's data from the one with the newest data. It never moves,
+# changes or deletes anything in them.
+OLD_INSTALL_NAMES = (OLD_INSTALL_NAME, OLD_DESKTOP_ID, "wdg-" + _TAG + "-v2", "wdg-" + _TAG + "-merged",
+                     "wdg-" + _TAG + "-edition")
 
 
 def recovery_dir(firmware_cache):

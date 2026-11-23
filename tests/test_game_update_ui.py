@@ -749,7 +749,7 @@ class GameUpdateUiTests(unittest.TestCase):
         self.assertEqual(g._game_updates.acknowledge.call_count, 1)
 
     def test_boot_keeps_locosp_and_adds_modified_credit_below(self):
-        labels = ("by LOCOSP", "WDG-Bristle 1.1")  # [bristle] the build's name and version
+        labels = ("by LOCOSP", "WDG-Bristle 1.2")  # [bristle] the build's name and version
         # Measured from the real Spleen 5x8 Font.text_width API. The second
         # path covers its absence and Pyxel's built-in four-pixel advance.
         font = SimpleNamespace(text_width=Mock(side_effect=dict(zip(labels, (45, 115))).__getitem__))

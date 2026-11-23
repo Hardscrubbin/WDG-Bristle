@@ -1,9 +1,9 @@
 # Porting Bristle to another base (raylib / WDGoNG)
 
-Kept current with the code. Last update: WDG-Bristle 1.1.
+Kept current with the code. Last update: WDG-Bristle 1.2.
 
 Bristle is built so that moving it to a different game base means rewriting three thin files and
-five small edits, not the logic. This page lists every place Bristle touches the drawing library
+a handful of small edits, not the logic. This page lists every place Bristle touches the drawing library
 (pyxel) or the WDG app, and what each needs on a raylib-based base such as WDGoNG.
 
 **Licences.** Bristle's code is MIT (`LICENSE-HARDSCRUBBIN`). WDGoNG is under the PolyForm
@@ -17,7 +17,7 @@ licence text; Bristle does not import them.
 | Layer | Files | Imports pyxel? | Touches the app? | In a port |
 |---|---|---|---|---|
 | Core library | `plugins/_bristle/`: `codec`, `crypto`, `proto`, `plan`, `registry`, `delivery`, `session`, `fleet`, `gpsplace`, `espnow`, `link_usb`, `link_espnow`, `link_ble`, `ota`, `nearby`, `alerts`, `skimmer`, `second_core`, `signatures.yaml` | no | no | unchanged (it is copied from the Bristle Nodes folder by `tools/sync_wdg.py`) |
-| WDG-side logic | `service`, `ingest`, `nearby_engine`, `flasher`, `kismet_tap`, `hunt_scan`, `settings`, `wdg_ports` | no | no (`flasher` imports the game's `watchdogs.esp32_flash.run_esptool` if it is there and falls back to plain `subprocess`) | unchanged, except the two notes under "Other ties" |
+| WDG-side logic | `service`, `ingest`, `nearby_engine`, `flasher`, `kismet_tap`, `hunt_scan`, `settings`, `wdg_ports`, `mapfocus` (1.2: the zoom and the confidence radius for "open a suspect on the map", as plain numbers) | no | no (`flasher` imports the game's `watchdogs.esp32_flash.run_esptool` if it is there and falls back to plain `subprocess`) | unchanged, except the two notes under "Other ties" |
 | Host adapter | `host.py` | one call (`frame_count`, for a map marker) | **yes: the only file that does** | **rewrite** |
 | Screens | `screen.py`, `screen_more.py` | only through the `pyxel` object handed to their draw functions | no | **rewrite the draw functions**; the text-building functions stay |
 | Plugin | `plugins/bristle_core.py` | yes: keys, sounds, drawing calls | through `host` and the plugin base class | **rewrite** |
@@ -36,6 +36,7 @@ fails if a logic file imports pyxel, imports from `watchdogs`, or reaches for `s
 | `pyxel.frame_count` | `_close`, `_dialog_keys`, `_hunt_keys` | written to `app._esc_consumed_frame` so the game does not also act on the ESC that closed the screen | whatever the base uses to swallow a key press for one frame |
 | `pyxel.sounds[slot].set(notes, tone, volume, effect, speed)` and `pyxel.play(3, slot, loop=False)` | `_sound` | five short synthesised sounds (`notice`, `warning`, `follow`, `skimmer`, `beep`) on sound slots 52 to 55, channel 3 | load or synthesise five short sounds once; `PlaySound`. The names and when they play do not change |
 | `pyxel.rect`, `pyxel.text` | `draw` (only the "Bristle did not start" screen) | | as below |
+| `pyxel.btnp(KEY_ESCAPE)`, `btnp(KEY_UP / DOWN / LEFT / RIGHT)` | `_focus_keys` (1.2) | while the map is held on a suspect: ESC or an arrow key lets it follow the player again | the same keys on the new base |
 
 ### `plugins/_bristle/screen.py` and `screen_more.py`
 
@@ -51,6 +52,10 @@ Every draw function takes the drawing library as its first argument (`pyxel`) an
 Colours are pyxel palette numbers, named once at the top of `screen.py` (`C_BG`, `C_BAR`,
 `C_TITLE`, `C_TEXT`, `C_DIM`, `C_OK`, `C_WARN`, `C_ERR`, `C_BORDER`): map those nine names to the
 new base's colours.
+
+`screen_more.draw_focus()` (1.2) draws a suspect opened on the map: the confidence radius as line
+pieces it is handed (already cut to the map area by `mapfocus.segments`), a small cross on the spot,
+and one line of text bottom right. It uses the same four calls.
 
 `screen_more.typed()` reads `pyxel.input_text` (the characters typed this frame) and
 `btnp(KEY_BACKSPACE, hold, repeat)` for the one-line text input (passphrase, notes, place):
@@ -80,6 +85,9 @@ The functions that build what is shown (`node_rows`, `totals_text`, `coverage`, 
 | `app._known_wifi`, `app._known_ble` (sets), `app.gain_xp(n)` | `credit` | XP: 15 / 10 for a device new to the game, 1 for a known one | the base's XP call and "seen before" test |
 | `app.state.networks` (list) | `list_network` | the SCAN list | |
 | `watchdogs.app.WifiNetwork`, `watchdogs.app.BleDevice`, `app.wifi_networks`, `app.ble_devices` | `marker` | a marker on the map at a position | the base's map-marker call |
+| `app._record_scan_map_observation(kind, id, label, rssi, channel, position=)` | `marker` (1.2) | the game draws a marker only for what it has on record as heard this session at a position; this files it | whatever makes a marker visible on the base |
+| `app.proj` (`zoom`, `geo_to_screen(lat, lon)`), `watchdogs.app.ZOOM_LEVELS`, `W`, `MAP_H` | `map_view` (1.2) | the zoom levels, the size of the map and its own position-to-screen conversion | the base's map view |
+| `app._map_focus` (a `(lat, lon)` or `None`), `app.proj.zoom` | `map_focus`, `map_release` (1.2) | hold the map on a spot at a zoom, and let it follow the player again at the zoom it had | the base's camera |
 | `app.msg(text, colour)` | `message` | a short message on the HUD | |
 | `app.player_lat`, `app.player_lon` | `position` | where the player is, when there is no fresh fix | |
 | `app._muted` | `muted` | the game's mute switch | |
@@ -103,7 +111,7 @@ The functions that build what is shown (`node_rows`, `totals_text`, `coverage`, 
 
 ## The `[bristle]` edits in the game's own files
 
-Each is tagged `[bristle]` in a comment. A port needs the same five things from the new base.
+Each is tagged `[bristle]` in a comment. A port needs the same things from the new base.
 
 | File | Edit | Why | On an NG base |
 |---|---|---|---|
@@ -112,6 +120,21 @@ Each is tagged `[bristle]` in a comment. A port needs the same five things from 
 | `plugins/kismet_wardrive.py`, `_poll_worker()` | one line: `_bristle_tap.poll(self.engine, KISMET_URL)` | Kismet's alerts and source list, fetched on Kismet's own thread | call `kismet_tap.poll` with an object that has `_get`, `_post`, `_auth`, `datasources()` and `running` |
 | `plugins/kismet_wardrive.py` | `queue_wigle_upload()`, a public name for the queue function | Bristle queues a nodes-only drive for WiGLE without reaching into private names | |
 | `plugins/hardware_check.py` | one line for the fleet, and the "kept for Bristle" row for the Bluetooth adapter | | optional |
+| `watchdogs/app.py`, `update()` (1.2) | the camera aims at `_map_focus` when a plugin has set it, at the player otherwise | "open a suspect on the map" has to hold the map somewhere the player is not | the base's camera needs a "look here" hook |
+| `watchdogs/app.py`, `_draw_player()` (1.2) | while `_map_focus` is set the player figure is drawn at the player's position (not at all when that is off the map) instead of in the middle of the screen | the figure would otherwise stand on the suspect | a base that draws the player by position needs nothing |
+| `plugins/kismet_wardrive.py`, `datasources()` (1.2) | a source the plugin holds on one channel carries `lock` | the node planner counts a locked channel as covered by Kismet (`plan.kismet_heavy_channels`) | pass `lock`, or `hopping` False with `channel`, in the source list handed to `kismet_tap.poll` |
+
+### Other `[bristle]` edits in 1.2 that are not part of Bristle Nodes
+
+They are the game's own features, tagged the same way so they can be found. A port of the nodes
+does not need them.
+
+| File | What | Logic lives in |
+|---|---|---|
+| `plugins/kismet_wardrive.py` | the per-card channel lock (picker keys, the lock in the launch, putting it in force on the poll thread) and the per-card plan lines in the picker | `plugins/_kismet_extras.py` (`plan_cards`, `resolve_locks`, `picker_plan`, `parse_iw_channels`: no pyxel, no I/O) |
+| `plugins/_w5_hardware.py` | `phy_info()`: the text of `iw phy` for one card, read only | |
+| `watchdogs/app.py`, the Firmware screen and `_flash_do` / `_run_flash` | the note on disk around a firmware write, **F** for an install that did not finish, the page that says what state the board is in | `watchdogs/c5_resume.py` (no pyxel, no game object) |
+| `install.sh`, `tools/install_helper.py`, `watchdogs/legacy_names.py` | the first install finds earlier installs under the home folder and copies the player's data | `tools/install_helper.py` (`find_old_installs`, `copy_data`, `bring_data`) |
 
 Also Bristle's, outside `plugins/`: `bristle.conf.example`, the `BRISTLE_OWNER_KEY` placeholder in
 `secrets.conf.example`, and the test files `tests/test_bristle_*.py`.
@@ -137,5 +160,5 @@ Also Bristle's, outside `plugins/`: `bristle.conf.example`, the `BRISTLE_OWNER_K
 2. Write `host.py` for the new base (the table above is its whole contract).
 3. Write the draw functions of `screen.py` and `screen_more.py` against the new drawing calls.
 4. Write the plugin file: keys, the five sounds, the three menu entries, the map overlay.
-5. Make the five edits in the base's own files, tagged `[bristle]`.
+5. Make the edits in the base's own files, tagged `[bristle]`.
 6. Run the bench list (`bristle/docs/BENCH_TESTS.md`).

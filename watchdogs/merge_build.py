@@ -1,7 +1,7 @@
 """[merge-v3] Identity of this merged build, and the rules that stop upstream's
 in-game updater from replacing it.
 
-This tree is upstream edition 0.9.21.3 + Hardscrubbin's Kismet add-ons (v2) + selected
+This tree is the base edition 0.9.21.3 + Hardscrubbin's Kismet add-ons (v2) + selected
 WDGoNG features. ``watchdogs.__version__`` stays the plain numeric upstream version
 ("0.9.21.3") because upstream's updater, release tooling and upload User-Agent all
 require that exact form; the build suffix lives here and is only added for
@@ -37,7 +37,7 @@ NOTICE_TIMEOUT = 4.0
 
 BUILD_TAG = "bristle"
 BUILD_NAME = "WDG-Bristle"
-BUILD_VERSION = "1.1"   # [bristle] 1.1: three node links, updates over the air, nearby alerts, skimmer suspects
+BUILD_VERSION = "1.2"   # [bristle] 1.2: per-card channel lock, N-card split, suspects on the map, resumable firmware install
 
 # One line each, <= 83 characters: the Update Game window shows one log line.
 INSTALL_BLOCKED = "Blocked: WDG-Bristle is updated by hand, never from an online release."
@@ -49,7 +49,7 @@ _MARKER = Path("watchdogs") / "merge_build.py"
 
 
 def display_version(version) -> str:
-    """'0.9.21.3' -> 'WDG-Bristle 1.1 (base 0.9.21.3)' (display only; never parsed)."""
+    """'0.9.21.3' -> 'WDG-Bristle 1.2 (base 0.9.21.3)' (display only; never parsed)."""
     return f"{BUILD_NAME} {BUILD_VERSION} (base {version})"
 
 

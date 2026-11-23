@@ -202,6 +202,10 @@ def kismet_heavy_channels(sources: list, share: float = 1 / 6) -> tuple[set[int]
     (or channels) as Kismet names them ("6", "36HT40+", ...). An adapter hopping n channels gives
     each of them 1/n of its time; a channel whose share over all adapters reaches ``share`` counts as
     heavily covered. Returns (channels, a sentence saying what was found).
+
+    An adapter held on one channel is on it all the time, so that channel always counts. It is
+    known by ``lock`` (the channel the core locked it to) or by ``hopping`` being False with the
+    ``channel`` it is on.
     """
     time_on: dict[int, float] = {}
     adapters = 0
@@ -209,6 +213,10 @@ def kismet_heavy_channels(sources: list, share: float = 1 / 6) -> tuple[set[int]
         if source.get("kind") != "wifi" or not source.get("running", True):
             continue
         names = source.get("hop_channels") or source.get("channels") or []
+        if source.get("lock"):
+            names = [source["lock"]]
+        elif source.get("hopping") is False and source.get("channel"):
+            names = [source["channel"]]
         numbers = set()
         for name in names:
             digits = ""
