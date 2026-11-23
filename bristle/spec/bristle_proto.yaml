@@ -1,0 +1,239 @@
+# Bristle protocol: the ONE source of truth.
+# Edit this file, then run:  python -I tools/gen_proto.py
+# That regenerates firmware/bristle_node/BristleProto.h, core/bristle/proto.py and
+# tests/vectors/vectors.json, and checks every test vector. Never edit generated files.
+
+product:
+  name: Bristle                 # rename here (display name)
+  prefix: BRISTLE               # node names: BRISTLE-<n>, BRISTLE-NEW
+  protocol_version: 1
+
+# ---------------------------------------------------------------------------------------------
+# Line format (USB serial and BLE). One message per line:
+#     TYPE:key=value,key=value*CRC\n
+#   - TYPE: upper-case letters, 2-6 chars.
+#   - Values are percent-encoded: every byte outside [A-Za-z0-9-_.~/] becomes %HH (upper-case hex).
+#     So values never contain , = * : % space CR LF. ('/' is left as it is: it has no meaning in a
+#     line, and a channel plan is full of them. A decoder accepts %2F as well.)
+#   - CRC: CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no reflection, no xor-out) over every
+#     byte before the '*', written as 4 upper-case hex digits.
+#   - A line with a bad CRC, an unknown TYPE or a missing required field is dropped and counted.
+#   - Field order is free; unknown keys are ignored (forward compatible).
+#   - MACs/BSSIDs: 12 lower-case hex digits, no separators, in printed order.
+# ---------------------------------------------------------------------------------------------
+line:
+  max_bytes: 240                # longest line including '*CRC\n' (fits a BLE notify and ESP-NOW)
+  crc: crc16_ccitt_false
+  unreserved: "A-Za-z0-9-_.~/"
+
+# ---------------------------------------------------------------------------------------------
+# ESP-NOW frame (node <-> bridge). Binary, little-endian:
+#   magic  'B','R'            2
+#   ver    u8 (=protocol)     1
+#   kind   u8                 1   0 = lines, 1 = poll (node checks in, empty payload)
+#   ctr    u32                4   per-sender counter, strictly increasing; replays are dropped
+#   frag   u8                 1   high nibble = index, low nibble = count (0x01 = not fragmented)
+#   len    u8                 1   payload length
+#   payload                   len bytes: one or more lines WITHOUT '*CRC', '\n'-separated
+#   tag    8 bytes                HMAC-SHA256(owner_key, "bristle-frame" || all bytes before tag)[:8]
+# Unowned nodes can't send signed frames, so adoption is over USB only (see adoption).
+# ---------------------------------------------------------------------------------------------
+espnow_frame:
+  magic: "BR"
+  header_bytes: 10
+  tag_bytes: 8
+  max_bytes: 250                # ESP-NOW v1 payload limit
+  kinds: {lines: 0, poll: 1}
+  hmac_label: "bristle-frame"
+
+# ---------------------------------------------------------------------------------------------
+# Owner lock and authentication (all transports)
+#   owner_key: 16 random bytes, set by the core at adoption, stored in node NVS.
+#   owner_id  = HMAC-SHA256(key, "bristle-owner-id")[:4]          -> 8 hex
+#   Handshake (core speaks first):
+#     core -> HI:v=1,cn=<16-byte core nonce hex>
+#     node -> HELLO:...,nn=<16-byte node nonce hex>[,np=<node proof>]   (np only if owned)
+#               node proof = HMAC(key, "bristle-node" || cn || hwid)[:16]  -> 32 hex
+#     core checks np, then core -> AUTH:cp=<core proof>
+#               core proof = HMAC(key, "bristle-core" || nn || hwid)[:16]  -> 32 hex
+#     node checks cp. Only then does it accept commands other than HI, PING and IDENT.
+#     TIME is also accepted before the handshake, but only by a node with no owner: an owned node
+#     takes its clock from its owner alone, so nobody else can shift its timestamps.
+#   hwid = the node's 6-byte base MAC (eFuse), printed order, raw bytes.
+#   Nonces are raw bytes in the HMAC input (not hex text).
+# ---------------------------------------------------------------------------------------------
+auth:
+  key_bytes: 16
+  nonce_bytes: 16
+  proof_bytes: 16
+  owner_id_bytes: 4
+  labels: {owner_id: "bristle-owner-id", node: "bristle-node", core: "bristle-core"}
+  auth_timeout_ms: 10000        # a link that hasn't authenticated by then is dropped
+
+adoption:
+  # ADOPT is accepted only over USB, and only by a node with no owner. Wireless adoption would send
+  # the key in the clear; a later version may add an ECDH (X25519) exchange plus a BOOT-button press.
+  transports: [usb]
+  forget_hold_ms: 5000          # hold BOOT this long to forget the owner
+
+# ---------------------------------------------------------------------------------------------
+# Channel plan
+#   PLAN:f=<flags>,r=<U|E>[,d=<dwell_ms>],c=<entry>/<entry>/...
+#   An entry is <ch>.<dwell_ms>, or just <ch> for "the default dwell d". Writing the common dwell
+#   once keeps a full plan (every channel of a region) inside one line; with a dwell on every entry
+#   it would not fit. d is required when any entry has no dwell of its own.
+#   plan hash = FNV-1a 32-bit over the canonical text "f=<f>;r=<r>;c=<c>" (ASCII), 8 lower-case hex,
+#   where <c> always has the dwell written on every entry (<ch>.<dwell_ms>/...), however it was sent.
+#   The node reports the hash of the plan it holds; the core resends the plan until it matches.
+# ---------------------------------------------------------------------------------------------
+plan:
+  flags: {wifi: 1, ble: 2}
+  max_entries: 64
+  dwell_ms: {min: 30, max: 1000, default: 120}
+  regions:
+    U:
+      ch24: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+      ch5: [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165]
+      country: "US"
+    E:
+      ch24: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+      ch5: [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140]
+      country: "DE"
+
+security:                       # k= in AP finds
+  OPEN: 0
+  WEP: 1
+  WPA_PSK: 2
+  WPA2_PSK: 3
+  WPA_WPA2_PSK: 4
+  WPA2_ENTERPRISE: 5
+  WPA3_PSK: 6
+  WPA2_WPA3_PSK: 7
+  WAPI: 8
+  OWE: 9
+  WPA3_ENTERPRISE: 10
+  UNKNOWN: 15
+
+link_types: {usb: 1, espnow: 2, ble: 3}
+
+heartbeat_flags:
+  RUNNING: 1                    # scanning right now
+  OWNED: 2                      # has an owner key
+  AUTHED: 4                     # this link passed the handshake
+  CLOCK: 8                      # clock set by the core since boot
+  CAP_5G: 16                    # radio can scan 5 GHz
+  CAP_BLE: 32                   # can scan BLE
+  QUEUE_FLASH: 64               # queue is backed by flash
+  OTA_SLOTS: 128                # has two OTA app slots
+  IDENTIFYING: 256              # LED blinking for identify
+
+run_mask: {wifi: 1, ble: 2}
+
+timing:
+  heartbeat_ms: 3000
+  time_request_ms: 5000
+  ack_min_interval_ms: 500
+  resend_stall_ms: 10000
+  queue_save_ms: 15000          # flush the RAM queue to flash at least this often while running
+  repeat_ap_ms: 300000          # a node re-reports the same BSSID only after this long
+  repeat_ble_ms: 30000
+  usb_hello_wait_ms: 1500       # discovery: wait this long for HELLO after HI
+  usb_hello_tries: 3            # then give up on that port until it is unplugged and plugged in again
+  core_ping_ms: 5000            # the core sends PING when it has sent nothing else for this long
+  link_timeout_ms: 20000        # a node that hears nothing valid for this long treats the link as gone
+  time_resync_ms: 600000        # the core sends TIME again this often (node clocks drift)
+  espnow_visit_interval_ms: 1500   # a scanning node returns to the control channel this often
+  espnow_visit_window_ms: 40       # and listens/sends for this long
+  espnow_control_channel: 1
+
+# ---------------------------------------------------------------------------------------------
+# The node's find queue (RAM + LittleFS). Not on the wire, but the limits live here with the rest.
+#   Every find is written with the time it was captured. If the node has no clock yet, the record
+#   holds the boot number and the uptime instead, and gets its real time when the core sets the
+#   clock during that same boot. A boot that ends without ever getting a clock cannot be timed:
+#   its finds are dropped and counted (qd), never sent without a time.
+# ---------------------------------------------------------------------------------------------
+queue:
+  seq_block: 1000               # sequence numbers are reserved in NVS in blocks this big
+  segment_bytes: 32768          # one segment file on flash
+  ram_flush_bytes: 4096         # flush to flash when this much is waiting in RAM
+  ram_max_bytes: 49152          # with no usable flash, RAM holds this much, then drops the oldest
+  min_free_bytes: 49152         # below this much free flash, the oldest segment is dropped
+  time_bases: 12                # boots whose clock offset is remembered for finds stored by uptime
+  flash_layout:                 # partitions_bristle_8mb.csv; checked by the node at boot
+    app_slot_bytes: 2621440     # 0x280000, two of them (OTA)
+    queue_bytes: 3014656        # 0x2E0000, LittleFS
+
+usb:
+  baud: 115200                  # ignored by native USB; needed for CH343-type bridges
+
+ble:
+  # Fresh, project-owned 128-bit UUIDs (randomly generated for Bristle).
+  service_uuid: "7b1f2c3a-5d4e-4b6f-9a80-b1e5711e0001"
+  command_uuid: "7b1f2c3a-5d4e-4b6f-9a80-b1e5711e0002"
+  notify_uuid:  "7b1f2c3a-5d4e-4b6f-9a80-b1e5711e0003"
+  mtu: 247
+
+# ---------------------------------------------------------------------------------------------
+# Messages. dir: c2n = core to node, n2c = node to core. req = required fields.
+# Every command may carry id=<1-8 hex> and the node answers RSP with the same id.
+# ---------------------------------------------------------------------------------------------
+messages:
+  HI:     {dir: c2n, req: [v, cn], doc: "Core hello with a fresh nonce. Starts the handshake."}
+  HELLO:  {dir: n2c, req: [v, hw, bd, b, cap, nn], opt: [np, oid, n, nm],
+           doc: "Node hello: protocol v, hwid hw, board bd, build b, capability flags cap, node nonce nn, node proof np (if owned), owner id oid, node number n, name nm."}
+  AUTH:   {dir: c2n, req: [cp], doc: "Core proof. Completes the handshake."}
+  ADOPT:  {dir: c2n, req: [k, n], doc: "USB only, unowned nodes only: owner key k (32 hex) and node number n."}
+  TIME:   {dir: c2n, req: [u], doc: "Clock: unix seconds (UTC), may carry ms= for milliseconds. An owned node takes it only from its authenticated owner."}
+  TREQ:   {dir: n2c, req: [], doc: "Node asks for the time (every time_request_ms until set)."}
+  NUM:    {dir: c2n, req: [n], doc: "Set node number."}
+  PLAN:   {dir: c2n, req: [f, r, c], opt: [d], doc: "Channel plan (see plan section). d is the dwell for entries that carry none."}
+  RUN:    {dir: c2n, req: [m, s], doc: "Run mask m (0 = stop) and session s."}
+  ACK:    {dir: c2n, req: [q], doc: "Core has every find with seq < q. No RSP."}
+  PING:   {dir: c2n, req: [], doc: "Liveness. RSP ok."}
+  IDENT:  {dir: c2n, req: [d], doc: "Blink the LED for d seconds (0 = stop)."}
+  REPEAT: {dir: c2n, req: [ap, ble], doc: "Repeat suppression windows in ms."}
+  FORGET: {dir: c2n, req: [], doc: "Owning core frees the node (clears owner, number, plan, queue)."}
+  OTA:    {dir: c2n, req: [op], opt: [size, sha, o, d],
+           doc: "op=begin (size, sha=sha256 hex) | chunk (o offset, d base64url data) | commit | abort | status."}
+  RSP:    {dir: n2c, req: [c, ok], opt: [id, e], doc: "Command result: command c, ok=1/0, error e."}
+  HB:     {dir: n2c, req: [n, f, ph, m, s, lk, qb, qd, qc, qf, qn, qo, b], opt: [t, up, ram, rs],
+           doc: "Heartbeat: node, flags, plan hash, run mask, session, link type, backlog, dropped, capacity, fill %, next seq, oldest seq, build, temp C, uptime s, free RAM KB, link RSSI."}
+  AP:     {dir: n2c, req: [q, t, s, b, c, r, k], opt: [e, ms],
+           doc: "Wi-Fi AP find: seq, unix time, session, BSSID, channel, RSSI, security, SSID e, ms part of time."}
+  BT:     {dir: n2c, req: [q, t, s, m, r], opt: [at, nm, mf, ms],
+           doc: "BLE find: seq, unix time, session, MAC, RSSI, address type at (0 public, 1 random), name nm, manufacturer company id mf (decimal), ms part of time."}
+  OTAS:   {dir: n2c, req: [st], opt: [o, e], doc: "OTA status: idle|receiving|verifying|ready|error, offset o, error e."}
+
+errors:
+  BAD_CRC: "bad CRC"
+  UNKNOWN: "unknown command"
+  NOT_AUTHED: "not authenticated"
+  OWNED: "already owned"
+  NOT_USB: "adoption is USB only"
+  BAD_FIELD: "missing or bad field"
+  BAD_PLAN: "bad plan"
+  OTA_STATE: "wrong OTA state"
+  OTA_VERIFY: "image failed verification"
+  BUSY: "busy"
+
+# ---------------------------------------------------------------------------------------------
+# Test vectors. gen_proto.py computes each "expect" from the reference implementation and fails
+# if it differs, so both sides are pinned to the same numbers.
+# ---------------------------------------------------------------------------------------------
+vectors:
+  crc16:
+    - {input: "HB:n=3,f=31", expect: "C888"}
+  encode:
+    - {input: "My Wi-Fi, 5G*", expect: "My%20Wi-Fi%2C%205G%2A"}
+    - {input: "1/6.30/11 a=b", expect: "1/6.30/11%20a%3Db"}
+  plan_hash:
+    - {f: 1, r: U, c: "1.120/6.120/11.120", expect: "d350013b"}
+  owner_id:
+    - {key: "000102030405060708090a0b0c0d0e0f", expect: "6ca639c3"}
+  node_proof:
+    - {key: "000102030405060708090a0b0c0d0e0f", cn: "00112233445566778899aabbccddeeff", hw: "a0b1c2d3e4f5", expect: "236f38ef09399a53c71aaa0c638debfe"}
+  core_proof:
+    - {key: "000102030405060708090a0b0c0d0e0f", nn: "ffeeddccbbaa99887766554433221100", hw: "a0b1c2d3e4f5", expect: "dd805ce85012e60994f4ff944df11325"}
+  frame:
+    - {key: "000102030405060708090a0b0c0d0e0f", kind: 0, ctr: 7, frag: 1, payload: "PING:", expect: "4252010007000000010550494e473acf7452ec86a86d6f"}

@@ -1,0 +1,36 @@
+# Bristle Nodes settings. Copy to bristle.conf (same folder) and change what you need.
+# Every line here shows the default. Nothing in this file is secret: the owner key lives in
+# secrets.conf (BRISTLE_OWNER_KEY) and is made by the game the first time Bristle starts.
+
+# Channel set: U = United States (2.4 GHz 1-11, 5 GHz 36-165), E = Europe (1-13, 36-140)
+region = U
+
+# The ONE Bluetooth adapter kept for Bristle (used by the Bluetooth link, a later step).
+# Kismet must not be given this adapter: PLUGINS > Hardware Check warns if it is.
+ble_adapter = hci0
+
+# Start and stop the nodes together with a Kismet wardrive (PLUGINS > Kismet). on / off
+tie_to_kismet = on
+
+# The small activity line on the map, and the key that switches it. on / off, a key name like F8
+hud = on
+hud_key = F8
+
+# A new ESP32 serial port is only listed on the Nodes screen; you press A to say hello to it.
+# on = say hello to new ESP32 ports by itself (never to excluded or "not a node" ones).
+auto_probe = off
+
+# Serial ports Bristle must never touch, comma separated (for example /dev/ttyACM0).
+# Marking a device "not a node" on the Nodes screen does the same per device, for good.
+exclude_ports =
+
+# More USB chips to treat as ESP32 boards, as vid:pid in hex, comma separated (for example 1a86:55d4)
+extra_usb_ids =
+
+# How long before a node reports the same access point / Bluetooth device again (seconds)
+repeat_ap_s = 300
+repeat_ble_s = 30
+
+# For the ESP-NOW bridge (a later step): the bridge board's serial port and the control channel
+bridge_port =
+control_channel = 1

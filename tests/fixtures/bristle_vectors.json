@@ -1,0 +1,58 @@
+{
+  "crc16": [
+    {
+      "input": "HB:n=3,f=31",
+      "expect": "C888"
+    }
+  ],
+  "encode": [
+    {
+      "input": "My Wi-Fi, 5G*",
+      "expect": "My%20Wi-Fi%2C%205G%2A"
+    },
+    {
+      "input": "1/6.30/11 a=b",
+      "expect": "1/6.30/11%20a%3Db"
+    }
+  ],
+  "plan_hash": [
+    {
+      "f": 1,
+      "r": "U",
+      "c": "1.120/6.120/11.120",
+      "expect": "d350013b"
+    }
+  ],
+  "owner_id": [
+    {
+      "key": "000102030405060708090a0b0c0d0e0f",
+      "expect": "6ca639c3"
+    }
+  ],
+  "node_proof": [
+    {
+      "key": "000102030405060708090a0b0c0d0e0f",
+      "cn": "00112233445566778899aabbccddeeff",
+      "hw": "a0b1c2d3e4f5",
+      "expect": "236f38ef09399a53c71aaa0c638debfe"
+    }
+  ],
+  "core_proof": [
+    {
+      "key": "000102030405060708090a0b0c0d0e0f",
+      "nn": "ffeeddccbbaa99887766554433221100",
+      "hw": "a0b1c2d3e4f5",
+      "expect": "dd805ce85012e60994f4ff944df11325"
+    }
+  ],
+  "frame": [
+    {
+      "key": "000102030405060708090a0b0c0d0e0f",
+      "kind": 0,
+      "ctr": 7,
+      "frag": 1,
+      "payload": "PING:",
+      "expect": "4252010007000000010550494e473acf7452ec86a86d6f"
+    }
+  ]
+}

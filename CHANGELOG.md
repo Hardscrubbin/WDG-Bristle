@@ -1,6 +1,81 @@
+# 0.9.21.3 — code-relative recovery helper, checked before device hand-off
+
+- Fix the recovery program path: locate esp32_flash.py beside the running app.py, independently of the configured data/loot directory and CWD. Do not move data or copy scripts into loot.
+- Verify the helper is readable before cache/download/device hand-off, clear the per-attempt cached path, and use the checked code path for recovery.
+- Exercise the production path selector with real helper --help subprocesses, including separate data directories, a different CWD and paths containing spaces. Verify actual release/OTA placement without opening a device.
+- The reported Python cannot-open-file / exit 2 means the helper never started, not that HardReset failed. The earlier rom-chip-id 10-second timeout remains a separate, unresolved physical issue; no physical migration success is claimed.
+- Preserve existing reset/supervision/port ownership, migration and write guards, backups, player data, requirements and exact C5/SOLO/Piglet firmware bytes. Game OTA never flashes ESP32.
+
+# 0.9.21.2 — native USB hand-off, ROM-independent recovery and durable diagnostics
+
+- Request a bounded native USB application reset through the same game Python without requiring ROM synchronization after a failed preflight. A fresh matching JanOS response is still required; a port or reset exit is not boot confirmation.
+- Configure the bound native USB reconnect's DTR/RTS before opening. Retain a serial handle after an uncertain close, preserve tool process ownership, and wait for stable enumeration of the same USB identity before preflight/recovery.
+- Preserve first failure, operation stage and real redacted tool output through the existing last_run.log route. Retain final partial/queued stdout/stderr on supervisor failure; keep recovery errors separate.
+- Preserve explicit M/Y older-base migration, all hardware/image/partition/security/slot guards, matching private recovery backups, application-only writes and fresh firmware/SOLO confirmation. No firmware bytes, esptool minimum, requirements, stub or flash speed changes.
+- The first physical timeout on PapaSucio's C5 remains unexplained by the available screenshots. Software regression evidence does not claim physical USB recovery or repair of that device.
+
+# 0.9.21 — GPS-following map and WDGWars portal integration
+
+- Release 0.9.21 builds on the public 0.9.20 baseline; numeric runtime 0.9.21 is compatible with the existing updater parser. Public OTA and firmware stay unchanged.
+- Include the existing opt-in Auto Map + Turf implementation and LOCOSP portal API/approved upload metadata integration prepared for 0.9.21.
+- Use the existing fresh measured GPS sampler for automatic download neighborhoods and the current-territory hint; manual map panning or an old display fix cannot supply a network position.
+- Tolerate non-object automatic-map settings and normalize/validate disk cache numbers and cells before scheduling or rendering. Reading an invalid cache does not delete it.
+- Fix the offline downloader regression so it executes the real downloader, and include automatic-map polling in the updater UI harness.
+- Preserve inherited SOLO, Piglet, GPS/backfill, XP, saved data, upload receipts, settings and firmware. Device installation and authenticated live territory compatibility remain unconfirmed.
+
+---
+
+# 0.9.19.1 — gradual ADS-B and mesh map expiry after stopping reception
+
+- While ADS-B reception is active, keep each aircraft visible until no message for its identity has arrived for 60 seconds. Callsign and speed messages keep its last known coordinates visible; the map does not extrapolate a new position.
+- After ADS-B OFF, retain the last visible aircraft on the map and small radar for five minutes, then remove them progressively, farther from the receiver first. All retained aircraft disappear by ten minutes; other SDR modes do not reset this schedule.
+- Apply the same five-to-ten-minute OFF visibility schedule separately to MeshCore and Meshtastic. Expire display markers only, not saved contacts or discovery identities. The order uses the receiver position at switch-off; it does not alter object coordinates or simulate physical movement.
+- Resume reception with a 60-second grace period for retained aircraft; new position messages move their markers. Aircraft no longer heard then expire normally.
+- Start with an empty aircraft map after restarting the game. Saved XP, badges and aircraft logs remain independent of map visibility.
+- Retain the 0.9.19 empty startup map and all earlier progress/contact fixes. This release supersedes the 0.9.19 ADS-B visibility and indefinite mesh-after-OFF policies described below.
+- Display `UP TO DATE` only after the approved source has been checked and matches the installed runtime. Preserve explicit check failures and source validation.
+- Automatically restart after a successful installation performed by the 0.9.19.1 updater, preserving the interpreter, launch arguments and environment. Preparing, cancelling or failing an update never restarts the game. Older running 0.9.17–0.9.19 clients still need one manual relaunch for their first upgrade to 0.9.19.1.
+
+# 0.9.19 — current-session mesh markers and live ADS-B visibility
+
+- Restore the original startup map behavior: keep saved MeshCore/Meshtastic contacts and XP, but create their map markers only after reception in the current game session. GPS backfill alone cannot replay the contact archive.
+- Hide aircraft on both map views while ADS-B is inactive or their position/reception is older than 60 seconds. Callsign and velocity messages no longer refresh the age of an old position.
+- Clear only the transient aircraft cache after confirmed SDR shutdown. Preserve saved progress, logs, counters and session XP deduplication; report pending shutdown instead of claiming STOP succeeded.
+- Install the latest complete code in one transaction, including skipped earlier corrections. Add versioned note filtering for future updates; existing 0.9.17/0.9.18 readers show the shared transition description.
+- Keep mesh markers detected this session visible until the game closes, including after LoRa is switched off. Do not introduce a mesh expiry policy or change chat channels, radio parameters, uploads or Deauth.
+
+# 0.9.18 — preserve progress, complete bridge scans and repair mesh contact panels
+
+- Upgrade the legacy v1 loot database without rebuilding earned XP, badges, contacts or discovery history. Existing session counts remain even if the original logs were removed.
+- Save a byte-for-byte private backup before migration; use an atomic database replacement and make repeated launches idempotent.
+- Keep explicitly saved zero XP. Bootstrap XP from loot only when no saved XP exists.
+- Stop startup on unreadable, unsupported or unsafe database migration instead of silently showing a new zero-XP player.
+- Document how a separate clone can use an existing installation's data folder. This does not add old and new XP or invent points missing from an overwritten save.
+- Accept the Linux WiFi/BLE bridge's exact final `BLE scan done` marker while retaining projectZero/XIAO completion, save/STOP checks and the two-second handover. Adapter warnings pause the schedule; late replies cannot restart a cancelled scan.
+- Display an empty contacts panel in MeshCore and Meshtastic instead of hiding it until the first node appears. In MeshCore, the empty panel captures input and Esc closes it without leaving chat; deleting the final contact keeps the panel visible. Protocol states remain separate.
+- Separate update-note corrections with numbered yellow titles, white factual descriptions and blank lines. Existing 0.9.17 readers retain the same plain-text section boundaries until the renderer is updated.
+
+---
+
+# 📡 Earlier edition — release preparation (2026-11-01)
+
+- Consolidates the deployed MeshCore/Meshtastic integration and earlier receiver-prototype improvements on one review branch.
+- Includes local AUTO GPS RF approvals, receiver-position provenance and persistent mesh discoveries.
+- Includes ESP32/GPS startup recovery, alternating WiFi/BLE wardrive phases and exact upload receipts including cooldown handling.
+- Adds English documentation, privacy-reviewed demo derivatives, source credits and release-preparation checks.
+- Adds game-owned hardware shutdown: final data/XP save, worker and serial release, and managed AIO power off with USB last.
+- Adds the private **SYSTEM → Update Game** preview: explicit fork release source, one notice per approved release, full notes, separate install confirmation, code backup and interrupted-install recovery.
+- Keeps numeric version **0.9.16** unchanged. Startup retains **by LOCOSP**, with a second credit line underneath.
+- Records **501/501 passing uConsole software tests**, including replay of the existing private recorded-frame fixture; see [Validation](docs/VALIDATION.md) for platform skips, native UI checks and the separate hardware evidence.
+- Preserves the original game/UI style, artwork, license and dated upstream history below. No new on-air reception or remote chat delivery is claimed by this documentation review. No release feed or public repository has been published.
+
+---
+
 # Changelog
 
-All notable changes to **Watch Dogs Go** are documented in this file.
+The numbered entries below retain LOCOSP’s dated upstream history. They describe behavior at those releases and may be superseded by the fork changes above—for example, the old `git pull` updater is not the current release-feed updater.
+
+All notable upstream changes to **Watch Dogs Go** are documented below.
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
 This project follows [Semantic Versioning](https://semver.org/) — currently in
 the `0.x` series, meaning the API and on-disk format may still change between
@@ -8,7 +83,32 @@ minor versions.
 
 ---
 
-## [0.9.13] — 2026-06-04
+
+## 0.9.21.1 — esptool repair, explicit C5/SOLO migration and honest labels
+
+- Repair the already-required esptool in the actual game interpreter, including existing .venv installations and an explicit in-panel P repair after OTA. Keep requirements.txt and minimum 5.0.0 unchanged; failed install/tool checks never flash.
+- Add a separately confirmed M/Y migration for a fresh, explicit missing-SOLO response from the current native XIAO ESP32-C5 rev1.0/8MiB device. Explicitly disclose the older JanOS 1.7.0+SOLO base; ordinary downgrade protection and same-version reinstalls remain.
+- Retain image/USB/ROM/security/table/active-slot/port checks. Before migration, require two independent matching private full-flash recovery reads and original application sectors. Write only the approved app with unchanged transfer settings; keep backups out of Git and public reports.
+- Confirm a returning upstream installation with fresh version AND SOLO interface responses. Timeouts, disconnects, partial/stale replies and exit0 alone are not success or migration permission.
+- Distinguish reported JanOS, SOLO interface confirmation and the approved package; stop branding plain version numbers as upstream.
+- Keep all C5/SOLO 1.7.0 and Piglet BIN/manifest bytes unchanged; game 0.9.21.1 never automatically flashes ESP32. No Dark3D/Android or architecture changes.
+- Physical migration remains NOT VERIFIED.
+
+## [0.9.14] — 2026-10-07
+
+### Added
+- **In-game updater** — `SYSTEM > Update Game`. The game checks GitHub on launch
+  and flags `[UPD] New game vX available` when the checkout's own upstream is
+  ahead; the Update Game screen then runs `git pull` for you and prompts a
+  restart. Your loot/saves are untouched (gitignored) — no manual file copying.
+- README **"Updating"** section (in-game / terminal / installer paths).
+
+### Changed
+- The game version check is git-based — it fetches the checkout's own
+  `origin/<branch>` and compares commits, so it works on any branch/repo and
+  always matches what the updater actually pulls.
+
+## 0.9.13 — 2026-06-04
 
 Companion to 0.9.12 — handles the transient HTTP 413 the same user
 (dtmcnamara) saw on the larger of two sessions during a sync. Now
@@ -59,7 +159,7 @@ limit.
 
 ---
 
-## [0.9.12] — 2026-06-04
+## 0.9.12 — 2026-06-04
 
 Bugfix for the **Captured Passwords** screen in `LOOT DATABASE`. A user
 reported the count and the list were inflated with every Evil Twin /
@@ -106,7 +206,7 @@ without touching anything on disk.
 
 ---
 
-## [0.9.11] — 2026-05-08
+## 0.9.11 — 2026-05-08
 
 Quality-of-life follow-up to 0.9.10. The Stadia Maps tile endpoint
 returns `HTTP 401 Unauthorized` for every request that doesn't carry
@@ -137,7 +237,7 @@ their download path is unchanged.
 
 ---
 
-## [0.9.10] — 2026-05-02
+## 0.9.10 — 2026-05-02
 
 Re-enabled offline map tile downloads, this time backed by Stadia Maps
 instead of the previously-disabled CartoDB Dark Matter source.
@@ -167,7 +267,7 @@ individually whether to opt in by adding their own free API key.
 
 ---
 
-## [0.9.9] — 2026-05-02
+## 0.9.9 — 2026-05-02
 
 Two community contributions cherry-picked from FusedStamen's fork —
 the rest of his branch (handshake architecture change, AWUS packet
@@ -235,7 +335,7 @@ PRs #4, #5 and #6 closed with cherry-pick reference.
 
 ---
 
-## [0.9.8] — 2026-04-26
+## 0.9.8 — 2026-04-26
 
 Surface the new `aircraft_already_seen` field that wdgwars.pl now
 returns alongside `aircraft_imported`. Companion to 0.9.6 — the server
@@ -276,7 +376,7 @@ addressed end-to-end.
 
 ---
 
-## [0.9.7] — 2026-04-26
+## 0.9.7 — 2026-04-26
 
 Accept any character device as a "serial port" so community PTY bridges
 work without patching the entry point.
@@ -318,7 +418,7 @@ auto-detect (which finds nothing).
 
 ---
 
-## [0.9.6] — 2026-04-24
+## 0.9.6 — 2026-04-24
 
 Hotfix for a data-loss bug in `plugins/wardrive_upload.py` reported by
 a US user running ADS-B overnight:
@@ -364,7 +464,7 @@ about it. Forwarded to the wdgwars admin separately.
 
 ---
 
-## [0.9.5] — 2026-04-24
+## 0.9.5 — 2026-04-24
 
 Runtime-selectable regional presets for the MeshCore radio. MeshCore
 upstream recently moved the default US/Canada preset from the legacy
@@ -421,7 +521,7 @@ from the in-game menu, without editing JSON by hand.
 
 ---
 
-## [0.9.4] — 2026-04-24
+## 0.9.4 — 2026-04-24
 
 Installer hardening after a user bug report: the Debian package
 `dump1090-mutability` that the installer pointed at has been an
@@ -479,7 +579,7 @@ falls back to `btmgmt public-addr` when it is missing.
 
 ---
 
-## [0.9.3] — 2026-04-21
+## 0.9.3 — 2026-04-21
 
 Hotfix for `wdgwars.pl` upload flow. The server now sits behind Cloudflare
 with Bot Fight Mode enabled, which drops HTTP requests carrying a generic
@@ -523,7 +623,7 @@ Done: 0/4 sessions
 
 ---
 
-## [0.9.2] — 2026-04-20
+## 0.9.2 — 2026-04-20
 
 Integration pass for the **LilyGO T-Watch Ultra** (PipBoy-3000 firmware).
 The watch firmware ≥ v0.4 hardened its BLE surface by requiring
@@ -591,7 +691,7 @@ makes the first-pair flow work end-to-end on the uConsole.
 
 ---
 
-## [0.9.1] — 2026-04-19
+## 0.9.1 — 2026-04-19
 
 Readability, performance and data-loss protection. No new gameplay.
 
@@ -802,7 +902,7 @@ points and the terminal is actively streaming.
 
 ---
 
-## [0.9.0] — 2026-04-12 (early access release)
+## 0.9.0 — 2026-04-12 (early access release)
 
 First public release. The core gameplay loop is complete and stable. Several
 advanced attacks are present in the menu but marked **(WIP)** because they
@@ -916,18 +1016,3 @@ The major pre-release milestones were:
   WiGLE-compatible upload, badge system)
 - **Bruce Firmware integration** — pull request to upstream
   `BruceDevices/firmware` adding native upload to wdgwars.pl
-
-[0.9.13]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.12...v0.9.13
-[0.9.12]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.11...v0.9.12
-[0.9.11]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.10...v0.9.11
-[0.9.10]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.9...v0.9.10
-[0.9.9]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.8...v0.9.9
-[0.9.8]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.7...v0.9.8
-[0.9.7]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.6...v0.9.7
-[0.9.6]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.5...v0.9.6
-[0.9.5]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.4...v0.9.5
-[0.9.4]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.3...v0.9.4
-[0.9.3]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.2...v0.9.3
-[0.9.2]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.1...v0.9.2
-[0.9.1]: https://github.com/LOCOSP/WatchDogsGo/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/LOCOSP/WatchDogsGo/releases/tag/v0.9.0

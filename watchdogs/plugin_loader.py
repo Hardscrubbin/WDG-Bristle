@@ -26,9 +26,23 @@ def discover_plugins() -> list:
 
     from plugins.plugin_base import PluginBase
 
+    # v-next: skip plugins the user has opted out of entirely, via
+    # DISABLED_PLUGINS in secrets.conf (see watchdogs/config.py). A
+    # disabled plugin is never imported or instantiated -- it doesn't
+    # appear in the PLUGINS menu and on_update()/on_load() are never
+    # called on it, full stop.
+    try:
+        from watchdogs.config import DISABLED_PLUGINS
+    except Exception:
+        DISABLED_PLUGINS = []
+    disabled = set(DISABLED_PLUGINS)
+
     loaded = []
     for f in sorted(plugins_dir.glob("*.py")):
         if f.name.startswith("_") or f.name == "plugin_base.py":
+            continue
+        if f.stem in disabled:
+            log.info("Plugin disabled (DISABLED_PLUGINS): %s", f.stem)
             continue
         module_name = f"plugins.{f.stem}"
         try:

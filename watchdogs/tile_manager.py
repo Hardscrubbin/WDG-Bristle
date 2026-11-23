@@ -11,6 +11,7 @@ import time
 import zlib
 from collections import OrderedDict
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 # ---------------------------------------------------------------------------
@@ -51,35 +52,111 @@ DOWNLOAD_TIERS = [
 OSM_TILE_SIZE = 256
 USER_AGENT = "WatchDogsGo/1.0 (security-research-game)"
 
-# Stadia Maps — Alidade Smooth Dark style
-# Free tier, raster PNG tiles, dark theme matching game aesthetic
-# API key loaded from secrets.conf (STADIA_API_KEY=...)
-# Sign up free at https://stadiamaps.com
+# Two supported raster tile providers, both dark-themed to match the
+# game's cyberpunk overlay. Stadia was the original/only provider;
+# MapTiler support was added so anyone who already has a MapTiler key
+# (e.g. from another mapping project) doesn't need to sign up for a
+# second service just for this game.
+#
+#   STADIA_API_KEY=...    -> Stadia Maps, Alidade Smooth Dark style
+#   MAPTILER_API_KEY=...  -> MapTiler, "Dataviz Dark" style
+#
+# v-next: the MapTiler style id below used to be "dark-matter". That
+# was wrong for every MapTiler account, not just this user's -- it was
+# CARTO's own basemap name (a completely different tile service),
+# carried over on the mistaken assumption that MapTiler hosts a style
+# under that same name. MapTiler has never had a map called
+# "dark-matter", so every single tile request 404'd with "Map with
+# this identifier does not exist" (confirmed against MapTiler's own
+# docs) regardless of how valid the API key was -- which is exactly
+# what a real user hit: 44/44 tiles failed, all with that message.
+# MapTiler's actual current dark basemap id is "dataviz-v4-dark".
+# Its tiles come back 512x512 (MapTiler's new default resolution) --
+# no code changes needed for that, _convert_tile_pil() already
+# downscales whatever size it's given to 256x256, the same way it
+# already handles Stadia's 512x512 "@2x" tiles.
+#
+# If both are set, Stadia is preferred (it was the original default and
+# some users may already have downloaded tiles keyed to it); set
+# TILE_PROVIDER=maptiler in secrets.conf to force MapTiler instead.
+# Sign up free at https://stadiamaps.com or https://www.maptiler.com
 _STADIA_BASE = "https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}@2x.png"
+_MAPTILER_BASE = "https://api.maptiler.com/maps/dataviz-v4-dark/{z}/{x}/{y}.png"
 
 
-def _load_stadia_key() -> str:
-    """Load Stadia Maps API key from secrets.conf."""
+def _load_secret(name: str) -> str:
+    """Load a single KEY=value line from secrets.conf."""
     try:
         from pathlib import Path as _Path
         conf = _Path(__file__).resolve().parent.parent / "secrets.conf"
         if conf.is_file():
             for line in conf.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
-                if line.startswith("STADIA_API_KEY="):
+                if line.startswith(f"{name}="):
                     return line.split("=", 1)[1].strip()
     except Exception:
         pass
     return ""
 
 
+def _load_stadia_key() -> str:
+    """Load Stadia Maps API key from secrets.conf."""
+    return _load_secret("STADIA_API_KEY")
+
+
+def _load_maptiler_key() -> str:
+    """Load MapTiler API key from secrets.conf."""
+    return _load_secret("MAPTILER_API_KEY")
+
+
+def active_tile_provider() -> str:
+    """Which provider will actually be used, given current secrets.conf.
+
+    Returns 'stadia', 'maptiler', or '' if neither key is configured.
+    An explicit TILE_PROVIDER=maptiler/stadia in secrets.conf wins when
+    that provider's key is present; otherwise Stadia is preferred if
+    both keys happen to be set (it was the original default), falling
+    back to whichever one key actually exists.
+    """
+    stadia_key = _load_stadia_key()
+    maptiler_key = _load_maptiler_key()
+    forced = _load_secret("TILE_PROVIDER").lower()
+    if forced == "maptiler" and maptiler_key:
+        return "maptiler"
+    if forced == "stadia" and stadia_key:
+        return "stadia"
+    if stadia_key:
+        return "stadia"
+    if maptiler_key:
+        return "maptiler"
+    return ""
+
+
+def tile_key_configured() -> bool:
+    """[merge-v3] Provider-aware "can we download tiles at all?" preflight.
+
+    upstream 0.9.21's manual Download Map and auto_map.py both gated on
+    _load_stadia_key() alone, so a MapTiler-only secrets.conf could never
+    download. Both gates now call this instead. It goes through
+    active_tile_provider(), which looks _load_stadia_key up at call time, so
+    code/tests that substitute that function still steer the result.
+    """
+    return bool(active_tile_provider())
+
+
 def _tile_url(z: int, x: int, y: int) -> str:
-    """Build Stadia Maps tile URL with API key if configured."""
-    url = _STADIA_BASE.format(z=z, x=x, y=y)
-    key = _load_stadia_key()
-    if key:
-        url += f"?api_key={key}"
-    return url
+    """Build the active provider's tile URL with its API key."""
+    provider = active_tile_provider()
+    if provider == "maptiler":
+        return _MAPTILER_BASE.format(z=z, x=x, y=y) + f"?key={_load_maptiler_key()}"
+    if provider == "stadia":
+        return _STADIA_BASE.format(z=z, x=x, y=y) + f"?api_key={_load_stadia_key()}"
+    # Neither key configured -- caller (app.py's preflight check) is
+    # expected to catch this before ever calling _tile_url, but return
+    # a keyless Stadia URL rather than raising, so a missed preflight
+    # check just gets Stadia's own "unauthorized" response instead of
+    # a crash.
+    return _STADIA_BASE.format(z=z, x=x, y=y)
 
 
 # Legacy constant kept for compatibility
@@ -223,7 +300,7 @@ def _convert_tile_pil(png_bytes: bytes) -> bytes:
 
 def download_tiles(lat: float, lon: float, maps_dir: Path,
                    radius_km: float = 100.0,
-                   callback=None) -> dict:
+                   callback=None, *, stop_on_error=False) -> dict:
     """Download Stadia Maps Alidade Smooth Dark tiles around lat/lon.
 
     Uses tiered radii per zoom level to keep download size reasonable.
@@ -279,7 +356,28 @@ def download_tiles(lat: float, lon: float, maps_dir: Path,
         except Exception as e:
             errors += 1
             if callback and errors <= 5:
-                callback(done / total * 100, f"ERR tile {z}/{tx}_{ty}: {e}")
+                # str(e) on an HTTPError is just "HTTP Error 404: Not
+                # Found" -- the generic reason phrase, not why. Tile
+                # providers put the actual cause (invalid key, key not
+                # entitled to this style/plan, etc.) in the response
+                # body, so surface a snippet of that instead of the
+                # bare status line whenever we can read it.
+                detail = str(e)
+                if isinstance(e, HTTPError):
+                    try:
+                        body = e.read().decode("utf-8", "replace").strip()
+                        if body:
+                            detail = f"HTTP {e.code}: {body[:150]}"
+                    except Exception:
+                        pass
+                callback(done / total * 100, f"ERR tile {z}/{tx}_{ty}: {detail}")
+            # [merge-v3] conflict: both sides rewrote the ERR line. Kept v2's
+            # response-body detail above AND upstream 0.9.21's stop_on_error below.
+            if stop_on_error:
+                # Auto-download: an offline connection must not retry hundreds
+                # of independent HTTP timeouts. Keep already cached tiles and
+                # write the manifest; the next scheduled attempt fills gaps.
+                break
 
         done += 1
         if callback and done % 20 == 0:
@@ -310,7 +408,7 @@ def download_tiles(lat: float, lon: float, maps_dir: Path,
 # ---------------------------------------------------------------------------
 
 class TileRenderer:
-    """Loads cached .dat tiles and renders them via pyxel pixel-by-pixel."""
+    """Cache the composed tile background; leave live map overlays to the caller."""
 
     def __init__(self, maps_dir: Path):
         self.maps_dir = maps_dir
@@ -319,10 +417,13 @@ class TileRenderer:
         self._manifest: dict | None = None
         self._load_manifest()
         self.tiles_visible = False
-        self._fb = None  # framebuffer reference (set on first draw)
+        self._background_key = None
+        self._background = None
+        self._background_drawn = False
 
     def _load_manifest(self):
         mf = self.maps_dir / "manifest.json"
+        self._manifest = None
         if mf.exists():
             try:
                 self._manifest = json.loads(mf.read_text())
@@ -335,9 +436,13 @@ class TileRenderer:
 
     def reload_manifest(self):
         self._load_manifest()
+        self._cache.clear()
+        self._background_key = None
+        self._background = None
+        self._background_drawn = False
 
     def draw(self, proj, W: int, H: int, HUD_TOP: int, TERM_Y: int) -> bool:
-        """Render visible tiles onto pyxel screen.
+        """Blit the cached background, rebuilding only when its pixels can change.
 
         Returns True if any tiles were drawn (caller can skip coastlines).
         """
@@ -347,6 +452,8 @@ class TileRenderer:
         game_zoom = proj.zoom
         osm_zoom = GAME_TO_OSM.get(game_zoom)
         if osm_zoom is None:
+            self._background_key = None
+            self._background = None
             return False  # Too far out for tiles
 
         # Viewport bounds in lat/lon
@@ -359,18 +466,83 @@ class TileRenderer:
         tx_min, ty_min = _lat_lon_to_tile(lat_n, lon_w, osm_zoom)
         tx_max, ty_max = _lat_lon_to_tile(lat_s, lon_e, osm_zoom)
 
-        drawn = False
+        tiles = []
         for tx in range(tx_min, tx_max + 1):
             for ty in range(ty_min, ty_max + 1):
-                if self._draw_tile(px, proj, osm_zoom, tx, ty,
-                                   W, H, HUD_TOP, TERM_Y):
-                    drawn = True
+                lat_tl, lon_tl = _tile_to_lat_lon(tx, ty, osm_zoom)
+                lat_br, lon_br = _tile_to_lat_lon(tx + 1, ty + 1, osm_zoom)
+                bounds = (*proj.geo_to_screen(lat_tl, lon_tl),
+                          *proj.geo_to_screen(lat_br, lon_br))
+                left, top, right, bottom = bounds
+                if (right <= left or bottom <= top or right <= 0 or left >= W
+                        or bottom <= HUD_TOP or top >= TERM_Y):
+                    continue
+                signature = self._tile_signature(osm_zoom, tx, ty)
+                tiles.append((tx, ty, bounds, signature))
 
-        self.tiles_visible = drawn
-        return drawn
+        # Integer projected bounds describe the exact sampling used below.
+        # Subpixel GPS smoothing must not rebuild an identical raster every frame.
+        key = (self.maps_dir, W, H, HUD_TOP, TERM_Y, osm_zoom, tuple(tiles))
+        if key != self._background_key:
+            self._background_key = None
+            self._background = None
+            self._background_drawn = False
+            try:
+                background = px.Image(W, H)
+                background.cls(0)
+                drawn, complete = self._draw_tiles(px, proj, osm_zoom, tiles,
+                                                   W, H, HUD_TOP, TERM_Y, background)
+            except Exception:
+                # Preserve the original renderer on older backends or allocation
+                # failure. Do not retain a partial image as a valid background.
+                return self._draw_uncached(px, proj, osm_zoom, tiles,
+                                           W, H, HUD_TOP, TERM_Y)
+            self._background = background
+            self._background_drawn = drawn
+            # A file can exist but be temporarily unreadable (or still being
+            # downloaded). Retry next frame rather than caching its omission
+            # indefinitely under an unchanged file signature.
+            self._background_key = key if complete else None
+
+        self.tiles_visible = self._background_drawn
+        if self.tiles_visible:
+            try:
+                # Opaque copy of the map rectangle only: HUD/terminal and live
+                # aircraft, contacts, particles, etc. never enter this cache.
+                px.blt(0, HUD_TOP, self._background, 0, HUD_TOP,
+                       W, TERM_Y - HUD_TOP)
+            except Exception:
+                self._background_key = None
+                self._background = None
+                return self._draw_uncached(px, proj, osm_zoom, tiles,
+                                           W, H, HUD_TOP, TERM_Y)
+        return self.tiles_visible
+
+    def _draw_tiles(self, px, proj, zoom, tiles, W, H, HUD_TOP, TERM_Y, target=None):
+        drawn = False
+        complete = True
+        for tx, ty, _bounds, signature in tiles:
+            if self._draw_tile(px, proj, zoom, tx, ty, W, H, HUD_TOP, TERM_Y, target):
+                drawn = True
+            elif signature is not None:
+                complete = False
+        return drawn, complete
+
+    def _draw_uncached(self, px, proj, zoom, tiles, W, H, HUD_TOP, TERM_Y):
+        self.tiles_visible, _complete = self._draw_tiles(px, proj, zoom, tiles,
+                                                        W, H, HUD_TOP, TERM_Y)
+        return self.tiles_visible
+
+    def _tile_signature(self, z, tx, ty):
+        try:
+            info = (self.maps_dir / str(z) / f"{tx}_{ty}.dat").stat()
+            return (info.st_dev, info.st_ino, info.st_size,
+                    info.st_mtime_ns, info.st_ctime_ns)
+        except OSError:
+            return None
 
     def _draw_tile(self, px, proj, z: int, tx: int, ty: int,
-                   W: int, H: int, HUD_TOP: int, TERM_Y: int) -> bool:
+                   W: int, H: int, HUD_TOP: int, TERM_Y: int, target=None) -> bool:
         """Render a single tile via direct framebuffer write. Returns True if drawn."""
         lat_tl, lon_tl = _tile_to_lat_lon(tx, ty, z)
         lat_br, lon_br = _tile_to_lat_lon(tx + 1, ty + 1, z)
@@ -399,11 +571,11 @@ class TileRenderer:
         if x_end <= x_start or y_end <= y_start:
             return False
 
-        # Direct framebuffer access (100x faster than pset loop)
         try:
-            if self._fb is None:
-                self._fb = px.screen.data_ptr()
-            fb = self._fb
+            surface = px.screen if target is None else target
+            # Keep native image storage owned by its image, never a screen
+            # pointer retained across frame/backend changes.
+            fb = surface.data_ptr()
             fb_w = W
         except Exception:
             fb = None
@@ -433,19 +605,26 @@ class TileRenderer:
                 for sx in range(x_start, x_end):
                     tp_x = int((sx - sx_tl) * inv_tw)
                     if 0 <= tp_x < OSM_TILE_SIZE:
-                        px.pset(sx, sy, img[row_off + tp_x])
+                        if target is None:
+                            px.pset(sx, sy, img[row_off + tp_x])
+                        else:
+                            target.pset(sx, sy, img[row_off + tp_x])
 
         return True
 
     def _get_tile_image(self, z: int, tx: int, ty: int):
         """Load tile from cache or disk. Returns flat array of palette indices."""
         key = (z, tx, ty)
+        signature = self._tile_signature(z, tx, ty)
         if key in self._cache:
-            self._cache.move_to_end(key)
-            return self._cache[key]
+            cached_signature, pixels = self._cache[key]
+            if signature is not None and signature == cached_signature:
+                self._cache.move_to_end(key)
+                return pixels
+            del self._cache[key]
 
         tile_path = self.maps_dir / str(z) / f"{tx}_{ty}.dat"
-        if not tile_path.exists():
+        if signature is None:
             return None
 
         try:
@@ -462,5 +641,5 @@ class TileRenderer:
         # LRU eviction
         if len(self._cache) >= self._max_cache:
             self._cache.popitem(last=False)
-        self._cache[key] = pixels
+        self._cache[key] = (signature, pixels)
         return pixels

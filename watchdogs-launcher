@@ -15,7 +15,7 @@ LOG_DIR="$HOME/.watchdogs"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 LAUNCHER_LOG="$LOG_DIR/launcher.log"
 
-exec lxterminal --title="ESP32 Watch Dogs" --no-remote -e bash -c "
+exec lxterminal --title="WDG-Bristle" --no-remote -e bash -c "
     sudo -E PYTHONDONTWRITEBYTECODE=1 \
         XDG_RUNTIME_DIR=/run/user/\${SUDO_UID:-\$(id -u)} \
         .venv/bin/python3 -m watchdogs 2>>'$LAUNCHER_LOG'

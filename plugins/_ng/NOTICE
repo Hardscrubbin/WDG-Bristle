@@ -1,0 +1,92 @@
+WDGoNG source files used by this build
+======================================
+
+The Python files in this folder are from LOCOSP's WatchDogsGo NG (WDGoNG),
+version 0.10.0, https://github.com/LOCOSP/WDGoNG
+
+    Required Notice: Copyright (c) 2025-2026 LOCOSP
+
+They are licensed under the PolyForm Noncommercial License 1.0.0
+<https://polyformproject.org/licenses/noncommercial/1.0.0>. The full licence
+text, exactly as shipped with WDGoNG 0.10.0, is in LICENSE-WDGoNG.txt next to
+this file.
+
+This build (WDG-Bristle) is for personal, noncommercial use. The PolyForm
+Noncommercial licence does not permit commercial use of these files. Anyone who
+receives a copy of them must also receive the licence terms (or the URL above)
+and the "Required Notice" line above.
+
+Files, copied byte for byte from the WDGoNG 0.10.0 source archive:
+
+    adsb_tracks.py     from  wdgong_ui/adsb_tracks.py
+                       ADS-B track loading, receiver coverage, KML export.
+    subghz_export.py   from  watchdogs/subghz_export.py
+                       rtl_433 raw I/Q (.cu8) -> Flipper Zero RAW .sub.
+    basemap.py         from  watchdogs/basemap.py
+                       MBTiles reader + tile maths for the offline world map.
+
+    SHA-256 (first 16 hex digits), identical to the source archive:
+        72A497587444217D  adsb_tracks.py
+        CFC0A6526ACB3D84  subghz_export.py
+        B4DEF0C6C6D3676F  basemap.py
+        072C5C8D537A1E49  LICENSE-WDGoNG.txt  (WDGoNG's LICENSE)
+
+    NOT included: WDGoNG's map data file, wdgong_ui/assets/map/basemap.mbtiles
+    (about 29 MB). It is not part of the WDGoNG 0.10.0 source archive. The
+    plugin uses it when the player copies it in (see plugins/ng_basemap.py).
+
+They are not modified. The code that connects them to upstream edition's pyxel game
+is in plugins/ng_adsb_tracks.py and plugins/ng_subghz_capture.py; those two
+plugins were written for this build and follow the behaviour of WDGoNG's
+backend (wdgong_ui/backend.py: _adsb_rx_log, adsb_tracks, adsb_export_kml;
+watchdogs/sdr_manager.py: start_433_grab, _grab_watcher), so they are covered
+by the same licence terms and notice.
+
+Two more WDGoNG features have no separate source file to copy (they live
+inside wdgong_ui/backend.py) and were written again for this build after
+WDGoNG's behaviour; they carry the same notice and licence terms:
+
+    plugins/ng_loot_backup.py, plugins/_loot_backup.py
+                       loot backup / restore to one file
+                       (backend.py: export_userdata, import_userdata)
+    plugins/kismet_wardrive.py: _ensure_gps
+                       GPS switched on automatically when a wardrive starts
+                       (backend.py: ensure_gps)
+    plugins/ng_wdgwars.py
+                       WDGWars pairing by code and the rank / team / territory
+                       status (backend.py: pair_start, _pair_worker,
+                       _fetch_gs_worker; main.py's game-state overlays). No
+                       portal code of WDGoNG's is used: every request goes
+                       through upstream's own Wars Sync client.
+    plugins/ng_basemap.py
+                       draws the offline world map from basemap.py's tiles in
+                       pyxel (main.py's basemap drawing, re-done for 16 colours)
+    plugins/ng_433_hunter.py
+                       433 MHz fox hunt with the RTL-SDR: WDGoNG's detection
+                       maths and KEY_HUNT_* constants (watchdogs/sdr_manager.py:
+                       start_key_hunt, _key_hunt_reader, keyhunt_learn)
+    plugins/ng_session_log.py
+                       loot session journal: browse sessions, preview files
+                       (main.py's loot screen SESSION LOG)
+    plugins/_loot_backup.py: auto_copy_db, damaged_db_hint
+                       rolling known-good copy of loot_db.json while playing
+                       (README "periodic auto-backup of the loot DB")
+
+One defect of a copied file is corrected OUTSIDE that file, so the copy stays
+byte-identical: subghz_export.cu8_to_pulses() can emit two timings of the same
+sign in a row on a noisy recording, which is not valid Flipper RAW data.
+plugins/ng_subghz_capture.py: repair_raw_sub() joins such neighbours after
+the .sub has been written.
+
+plugins/ng_subghz_capture.py also differs from WDGoNG's _grab_watcher on
+purpose: every capture gets a folder of its own, a .sub is written only from a
+recording that is complete and not empty (also after Stop), and the .sub is
+renamed into place when it is complete. The copied converter is unchanged.
+
+One WDGoNG bug fix is ported into upstream's own code rather than kept here:
+watchdogs/loot_manager.py counts a session's ADS-B aircraft as distinct ICAO
+codes (WDGoNG watchdogs/loot_manager.py: _fix_adsb_counts and the session
+scan). It is tagged [merge-v3] in that file.
+
+The rest of this tree is upstream edition 0.9.21.3; see ../../LICENSE and
+../../THIRD_PARTY_NOTICES.md.

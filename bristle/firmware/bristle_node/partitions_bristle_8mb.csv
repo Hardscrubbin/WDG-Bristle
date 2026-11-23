@@ -1,0 +1,12 @@
+# Bristle node flash layout, 8 MB. Two OTA app slots and a large LittleFS find queue.
+# The build script (tools/build_firmware.ps1 / .sh) hands this file to the Arduino build as
+# partitions.csv. The sizes are also in spec/bristle_proto.yaml (queue.flash_layout); the node checks
+# them at boot and says so on the console (`status`) if it was flashed with a different layout.
+# The LittleFS partition keeps the name "spiffs" because that is the label Arduino's LittleFS mounts.
+# Name,   Type, SubType,  Offset,   Size,     Flags
+nvs,      data, nvs,      0x9000,   0x5000,
+otadata,  data, ota,      0xe000,   0x2000,
+app0,     app,  ota_0,    0x10000,  0x280000,
+app1,     app,  ota_1,    0x290000, 0x280000,
+spiffs,   data, spiffs,   0x510000, 0x2E0000,
+coredump, data, coredump, 0x7F0000, 0x10000,
